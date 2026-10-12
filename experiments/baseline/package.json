@@ -2,7 +2,7 @@
   "name": "prox-voice-baseline",
   "version": "1.0.0",
   "private": true,
-  "description": "Server-mixed baseline (SFU forwarder) — the latency ruler for PROX-VOICE",
+  "description": "RTP-forwarding SFU comparison for PROX-VOICE (network RTT proxy)",
   "dependencies": {
     "werift": "^0.20.0",
     "ws": "^8.18.0"

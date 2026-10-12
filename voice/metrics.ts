@@ -42,8 +42,8 @@ export interface PeerHandle {
     pc: RTCPeerConnection;
 }
 
-// Fixed capture + encode + packetize + de-jitter + decode + playout delay that
-// no getStats field reports; the acoustic rig's offset C corrects the residual.
+// Assumed additive term in the software model, not a measured endpoint delay.
+// Jitter-buffer residence is already represented by the separate JB term.
 export const DEVICE_CONST_MS = 40;
 
 /** A fresh, all-pending link record stamped at detection time. */
@@ -78,7 +78,7 @@ export function applyState(rec: LinkMetric, state: string, nowMs: number): void 
     }
 }
 
-/** Rewrite one link's calibrated latency once the rig supplies the offset C. */
+/** Add a caller-supplied offset; the name does not imply physical validation. */
 export function applyCalibration(rec: LinkMetric, c: number): void {
     if (rec.latRawMs >= 0) { rec.latCalMs = Math.round(rec.latRawMs + c); }
 }
@@ -106,7 +106,7 @@ export function jitterBufferAvgMs(
     return (delay / count) * 1000;
 }
 
-/** The Eq. (1) software mouth-to-ear estimate: RTT/2 + jitter buffer + C. */
+/** Software model: RTT/2 + jitter buffer + the assumed 40 ms term. */
 export function m2eEstimate(rttSeconds: number, jbAvgMs: number): number {
     return Math.round((rttSeconds * 1000) / 2 + jbAvgMs + DEVICE_CONST_MS);
 }

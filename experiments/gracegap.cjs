@@ -2,7 +2,7 @@
  * Grace-window harness — duty-cycle effectiveness sweep.
  *
  * Measures three things for a given grace window W and absence duration D:
- *   reconnectGapMs   — listener-perceived silence from departure to audio resuming
+ *   reconnectGapMs   — packet-reception recovery delay after the return command
  *   holdKbps         — uplink bandwidth burned during the absence (idle-link cost)
  *   bPeersDuringAbsence — whether B still showed a peer entry during A's absence
  *
@@ -11,6 +11,8 @@
  * the link should already be warm when A returns.
  *
  * Usage:  node gracegap.cjs <graceMs> [absenceSec]    (defaults: 0, 6)
+ * Legacy harness: _pcs is not exposed by the shipped controller, and the stop
+ * detector retains its old timing heuristic. Adapt and verify before new runs.
  */
 const path = require("path");
 const fs   = require("fs");

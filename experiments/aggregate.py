@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Consolidate collected PROX-VOICE experiment JSON into result tables.
 
-Reads impl/experiments/data/:
+Reads experiments/data/ relative to this script:
   wsn-voice-N*-summary-*.json   (VoiceMetrics: formation/glare/latency/candidate)
   wsn-*-summary-*.json with meanUpKbps/sense (Phase B: uplink + suppression)
   wsn-mobility-*.json           (teardown / reconnect)
-Prints one table per experiment group. Newest run per N wins.
+Prints historical summaries. Last lexicographically sorted summary per N wins.
+Schema-v2 packet-gap runs are intentionally excluded from these legacy tables.
 
 Usage:  python3 aggregate.py
 """
@@ -34,7 +35,7 @@ def group12():
         return
     print("== Group 1+2: formation / glare / latency / uplink vs N ==")
     print(f"{'N':>2} {'peers':>5} {'connLinks':>9} {'setupMed':>8} {'ICE%':>4} "
-          f"{'relay%':>6} {'m2e~ms':>6} {'glare':>5} {'up/link':>7} {'sup%':>4}")
+          f"{'relay%':>6} {'sw~ms':>6} {'glare':>5} {'up/link':>7} {'sup%':>4}")
     for N in sorted(latest):
         pcs = latest[N]["perClient"]
         s   = [c["kpis"]["setupMedianMs"]  for c in pcs if c["kpis"]["setupMedianMs"]  >= 0]
@@ -100,14 +101,15 @@ def audiogap():
         stops.append(d["audioStopAfterOutMs"])
         recons.append(d["reconnectAudioGapMs"])
         totals.append(d["totalSilenceMs"])
-    print("\n== Group 3b: audio gap (listener-perceived silence, out-and-back) ==")
+    print("\n== Group 3b: legacy packet-gap records (not measured audible silence) ==")
     if not stops:
         print(f"  (no VALID runs among {len(files)} files)")
         return
     print(f"  valid runs={len(stops)} (skipped {skipped} invalid/superseded)")
-    print(f"  audio stop after leaving range: median={med(stops)}ms  range={min(stops)}-{max(stops)}ms")
-    print(f"  reconnect audio gap on return:  median={med(recons)}ms  range={min(recons)}-{max(recons)}ms")
-    print(f"  total silence (9s absence):     median={med(totals)}ms  range={min(totals)}-{max(totals)}ms")
+    print(f"  stored stop-after-out proxy:    median={med(stops)}ms  range={min(stops)}-{max(stops)}ms")
+    print(f"  stored recovery-after-return:  median={med(recons)}ms  range={min(recons)}-{max(recons)}ms")
+    print(f"  stored totalSilenceMs (legacy): median={med(totals)}ms  range={min(totals)}-{max(totals)}ms")
+    print("  Stored totals have not been revalidated; source/record schemas differ. See README.")
 
 
 def sensing():
@@ -203,7 +205,7 @@ def realnet():
         print("\n== Real-network conditions ==\n  (no wsn-voice-<condition>-trial<k>.json files yet)")
         return
     print("\n== Real-network conditions (per filename/URL tag) ==")
-    print(f"{'condition':>28} {'n':>3} {'setupMed':>8} {'ICE%':>5} {'relay%':>6} {'m2e~ms':>6} {'glare':>5}")
+    print(f"{'condition':>28} {'n':>3} {'setupMed':>8} {'ICE%':>5} {'relay%':>6} {'sw~ms':>6} {'glare':>5}")
     for cond in sorted(rows):
         r = rows[cond]
         print(f"{cond:>28} {r['n']:>3} {str(med(r['setup'])):>8} {str(mean(r['ice'])):>5} "

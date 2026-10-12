@@ -1,15 +1,14 @@
 /**
- * PROX-VOICE server-mixed baseline harness — measures the added server hop.
+ * PROX-VOICE RTP-forwarding SFU harness — samples client-to-server RTT.
  *
  * Boots the SFU (baseline/sfu.js), connects N headless browser peers to it,
  * and reads each browser's candidate-pair RTT to the server (the added hop).
  * Audio is forwarded through the server, so this is the client→server→client
  * topology that the P2P mesh replaces.
  *
- * Server-mixed one-way latency ~= RTT/2 (up) + RTT/2 (down) + forward cost;
- * on loopback both hops are ~0 ms, which validates the instrument. On real
- * networks this yields the real baseline to compare with
- * the mesh's direct peer-to-peer RTT.
+ * One-way network delay could be approximated by the sum of the endpoint
+ * half-RTTs under symmetry assumptions. The output here is a mean hop RTT,
+ * not end-to-end audio delay; near-zero loopback RTT does not validate timing.
  *
  * Usage:  node baseline.cjs [N] [holdSec] [port]     (defaults: 2, 12, 8090)
  */
@@ -84,14 +83,14 @@ function startSfu() {
 
         const rec = {
             exportedAt: new Date().toISOString(),
-            topology: "server-mixed-sfu",
+            topology: "rtp-forwarding-sfu",
             N,
             hopRttMs: snaps.map((s) => s.rttMs),
             hopRttMeanMs: meanRtt,
-            // One-way ≈ up-hop + down-hop = rtt/2 + rtt/2; on loopback both are ~0.
+            // Legacy field name retained for readers; value is a network proxy.
             serverMixedOneWayMs: meanRtt >= 0 ? meanRtt : -1,
             outPktsPerPeer: outPkts,
-            note: "loopback RTT ~0 validates the instrument; real ruler needs real networks",
+            note: "RTP forwarding without audio mixing; RTT-derived network proxy, not validated end-to-end audio delay",
         };
         const file = path.join(OUT_DIR, `wsn-baseline-N${N}-${STAMP}.json`);
         fs.writeFileSync(file, JSON.stringify(rec, null, 1));

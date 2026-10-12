@@ -1,17 +1,16 @@
 /**
- * Server-mixed baseline — SFU forwarder for PROX-VOICE.
+ * RTP-forwarding SFU comparison for PROX-VOICE; no decoding or audio mixing.
  *
  * A headless Node WebRTC node (werift) that browser peers connect to. Each
  * peer's audio is FORWARDED to every other peer through this server, so audio
  * traverses client → server → client (the centralized topology
- * that the P2P mesh replaces). The measured quantity is the added network
- * hop: the browser reports its candidate-pair RTT to this SFU, so server-
- * mixed one-way latency ~= RTT_up/2 + RTT_down/2 + forward cost, vs the
- * mesh's direct client↔client RTT/2.
+ * that the P2P mesh replaces). The browser reports candidate-pair RTT to
+ * this SFU, a network proxy rather than measured one-way audio latency.
  *
  * Own lightweight JSON-over-WebSocket signaling (browser is the offerer) — NOT
  * the game's op-105 relay, which would require reimplementing the RS login
- * protocol in Node. This is a measurement instrument on the same media path.
+ * protocol in Node. Multi-sender playback and physical timing need separate
+ * validation before interpreting this minimal forwarder as an audio baseline.
  *
  * Serves the minimal client page at http://127.0.0.1:<PORT>/ and signaling at
  * ws://127.0.0.1:<PORT>/ws.  Usage:  node sfu.js [port]   (default 8090)
@@ -47,7 +46,7 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 wss.on("connection", async (ws) => {
     const id = nextId++;
     const pc = new RTCPeerConnection({ codecs: { audio: [opus] } });
-    // Outbound track: what THIS peer receives (the mix of everyone else, forwarded).
+    // One outbound track receives forwarded RTP; this does not mix audio samples.
     const sendTrack = new MediaStreamTrack({ kind: "audio" });
     pc.addTransceiver(sendTrack, { direction: "sendrecv" });
     peers.set(id, { pc, sendTrack, ws });

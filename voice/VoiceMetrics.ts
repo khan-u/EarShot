@@ -5,11 +5,12 @@
  * indicators into collectable trial data without touching the negotiation path.
  * It covers the software-measurable half of experiment groups 1 and 2: link
  * setup time, ICE success rate, the winning candidate type, glare correctness,
- * and the software mouth-to-ear estimate the acoustic rig later calibrates.
+ * and a software latency model. Physical calibration requires separately
+ * validated, direction- and time-matched measurements.
  *
  * It imports nothing from the mesh — it is fed by an injected peer provider and
- * pushed lifecycle edges, and is duty-cycled with the radio — so observing the
- * network can never perturb it. Data leaves via exportJson() or the `wsnVoice`
+ * pushed lifecycle edges, and is duty-cycled with the radio. Instrumentation
+ * overhead has not been independently quantified. Data leaves via exportJson() or the `wsnVoice`
  * DevTools handle. The KPI arithmetic lives in ./metrics so it can be tested
  * without a browser.
  */
@@ -26,7 +27,7 @@ export class VoiceMetrics {
     private static timer: ReturnType<typeof setInterval> | null = null;
     private static sampling = false;            // getStats in flight — skip the tick
     private static links: Map<number, LinkMetric> = new Map();
-    private static calibrationMs = 0;           // C from the rig (D6 -> D4)
+    private static calibrationMs = 0;           // caller-supplied additive offset
     private static calibrated = false;          // has C been set at least once
     // Per-peer jitter-buffer counters for the recent-average latency estimate.
     private static lastJb: Map<number, { delay: number; count: number }> = new Map();
@@ -72,7 +73,7 @@ export class VoiceMetrics {
         if (rec != null) { rec.glare++; }
     }
 
-    /** Apply the rig-derived mouth-to-ear offset C (D6 calibrates D4). */
+    /** Apply a caller-supplied offset; this flag does not certify calibration accuracy. */
     static setCalibrationMs(c: number): void {
         VoiceMetrics.calibrationMs = c;
         VoiceMetrics.calibrated = true;

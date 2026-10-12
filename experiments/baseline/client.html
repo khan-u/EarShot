@@ -4,7 +4,7 @@
 <body>
 <pre id="log">baseline client</pre>
 <script>
-// Minimal browser peer for the server-mixed baseline. getUserMedia (fake mic),
+// Minimal browser peer for the RTP-forwarding SFU baseline. getUserMedia (fake mic),
 // offer to the SFU, then expose window.baselineStats() → candidate-pair RTT to
 // the server (the hop the latency ruler measures). Loaded over http://127.0.0.1
 // which is a secure context, so getUserMedia works without HTTPS.
