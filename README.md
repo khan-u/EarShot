@@ -1,18 +1,19 @@
-# PROX-VOICE
+# EarShot
 
-**PROX-VOICE: A Proximity-Driven WebRTC Voice Mesh for Wireless Sensor Network Emulation in Browser-Based Virtual Environments**
+Tools for measuring WebRTC audio-path delay and comparing recordings with browser telemetry.
 
-PROX-VOICE connects nearby participants through WebRTC audio in a browser-based virtual world. Links remain active for a grace window after peers move apart. It emulates a virtual proximity overlay, not physical MANET routing.
+EarShot combines a C++ measurement rig, a minimal browser client and a room server for repeatable proximity-voice experiments:
 
-- **Audio:** media normally travels directly between browsers, with TURN available as a relay.
-- **Discovery and signalling:** the game uses its game server; the standalone experiment client uses the room server included here.
-- **Experiment setup:** both devices load the same revised voice code through the [minimal browser client](client/README.md). No game application is needed for this setup.
+- **Measurement rig:** generates test signals and analyzes stereo recordings, preserving unshifted delay estimates.
+- **Browser client:** both devices load the same revised voice code, with proximity controls and receiver telemetry tied to each capture.
+- **Room server:** serves the client and coordinates membership, tile positions and signalling. Audio travels through WebRTC, directly or through TURN.
+- **Experimental scope:** proximity is based on virtual tile positions, with a grace window before departing links close. No game application is required; this does not implement physical MANET routing.
 
-The repository includes the browser client, room server, voice modules, C++ measurement rig, experiment harnesses and archived study data.
+**From PROX-VOICE to EarShot:** development has moved from [PROX-VOICE](https://github.com/khan-u/prox-voice), now archived, to this repository. EarShot retains the original pilot data and builds on that code with revised measurement tools and a standalone experiment setup. New captures are stored separately from the pilot.
+
+**Current status:** automated software checks pass. Two-device microphone/playout checks and physical timing validation remain necessary before collecting the expanded study data.
 
 [Repository layout](#repository-layout) · [Pilot results](#pilot-results) · [Offline reproduction](#offline-reproduction) · [Live experiments](#live-experiments)
-
-<p align="center"><img src="docs/figures/architecture.png" width="420" alt="Game-server control plane, peer-to-peer media, and TURN fallback"></p>
 
 ## Repository layout
 
