@@ -13,30 +13,120 @@ EarShot combines a C++ measurement rig, a minimal browser client and a room serv
 
 **Current status:** automated software checks pass. Two-device microphone/playout checks and physical timing validation remain necessary before collecting the expanded study data.
 
-[Repository layout](#repository-layout) · [Pilot results](#pilot-results) · [Offline reproduction](#offline-reproduction) · [Live experiments](#live-experiments)
+[Live experiments](#live-experiments) · [Offline reproduction](#offline-reproduction) · [Pilot results](#pilot-results) · [Measurement reference](#measurement-reference) · [Repository layout](#repository-layout)
 
-## Repository layout
+Run the commands below from the repository root. Start with offline reproduction to inspect the existing data, or live experiments to prepare new measurements.
 
-```text
-client/                  Minimal browser host, signalling server and source provenance
-voice/                   TypeScript voice, negotiation, sensing and KPI modules
-rig/                     C++17 stimulus generator, stereo WAV analyzer and fixtures
-  tests/                 C++ DSP/WAV unit tests and Python synthetic recovery checks
-experiments/
-  lib/                   Browser helpers, tone generation and measurement helpers/tests
-  rig-driver.cjs         Live Mac/phone capture; unshifted analysis and run manifests
-  audiogap.cjs           Revised packet-interruption proxy (not audible silence)
-  RUNSHEET-rig.md        Wiring, revised capture procedure and pilot limitations
-  compare-rig-runs.sh    Re-analyze archived WAVs and print capture summaries
-  plot-rig.py            Re-analyze WAVs, verify raw CSVs and regenerate both figures
-  aggregate.py           Print historical telemetry summaries with existing filters
-  baseline/              RTP-forwarding SFU comparison (werift + ws; no audio mixing)
-  data/                  134 historical JSON/JSONL files and five WAV/CSV capture sets
-  runs/                  New rig/packet-gap outputs (generated, ignored by Git)
-docs/figures/            Architecture and reproducible pilot figures
+## Live experiments
+
+### Start the client and room server
+
+`npm run start:client` starts the included server. It serves the browser client, manages room membership and tile positions, and relays voice signalling and measurement messages. Audio travels through WebRTC, directly or through TURN; no separate game server is needed.
+
+Requires Node.js >= 22.12.
+
+```bash
+npm ci
+npm run build:client
+npm run start:client
 ```
 
-Other harnesses cover formation (`harness.cjs`), mobility, grace windows, DTX, sensing, and failure diagnostics. They use the read-only controller probes described under **Live experiments** below.
+- **Local access:** the default server is available at `http://localhost:5001` on the Mac. It listens only on loopback; this address is not a phone-accessible setup.
+- **Two-device access:** configure a reachable HTTPS address trusted by the phone, using the [TLS or reverse-proxy instructions](client/README.md#start-the-client). Use that address on both devices. Plain HTTP to the Mac's LAN address does not provide phone microphone access.
+- **Manual audio check:** join the same room with different participant names, then enable voice and grant microphone permission on both devices. The [client instructions](client/README.md) also cover optional TURN and supported scenarios.
+
+### Capture audio with the physical rig
+
+- **Phone and sender:** join and enable voice on the phone with `?wsnmeasure=1`, keeping its page visible and the phone awake. Set `BASE_URL` to the same HTTPS address and room. The harness opens and joins the Mac sender automatically; close any manually joined Mac participant first. Harnesses use this repository's Playwright dependency and installed standard Chrome.
+- **Physical rig:** Mac captures require `afplay`, `ffmpeg` with AVFoundation support, `SwitchAudioSource`, and the wiring in the [runsheet](experiments/RUNSHEET-rig.md).
+
+Build and check the analyzer, then run the browser and telemetry preflight without recording:
+
+```bash
+make -C rig check
+node experiments/rig-driver.cjs --dry --peer-wait 60
+```
+
+After preflight succeeds and the physical controls in the runsheet are complete, collect five captures:
+
+```bash
+node experiments/rig-driver.cjs --runs 5 --amp 0.4
+```
+
+See [capture files and receiver telemetry](#capture-files-and-receiver-telemetry) for outputs and validity checks. A successful preflight does not validate physical timing.
+
+### Measure packet interruption with two automated browsers
+
+This experiment opens two local Chrome instances with synthetic audio, moves one participant out of proximity and back, and measures packet-counter interruption. It does not require the phone or physical rig. Use a separate room with no other participants:
+
+```bash
+BASE_URL='http://localhost:5001/?room=packetgap' node experiments/audiogap.cjs 9
+```
+
+The argument sets a nine-second absence; this harness uses zero grace. Install standard Chrome before running either browser harness. Results are packet-gap proxies, not measurements of audible silence; see [packet-gap and grace measurements](#packet-gap-and-grace-measurements).
+
+## Offline reproduction
+
+| Component | Requirement |
+|---|---|
+| Rig and recovery tests | C++17 compiler, `make`, Python >= 3.9 |
+| TypeScript tests | Node.js >= 22.12 and dependencies installed with `npm ci` |
+| Helper tests | Node.js >= 18; no browser/application needed |
+| Historical aggregation | Python >= 3.9, standard library only |
+| Figures | Python >= 3.9 and Matplotlib (requirements file below) |
+
+### Build and test
+
+```bash
+make -C rig check
+npm ci
+npm test
+npm run typecheck
+node --test experiments/lib/*.test.cjs
+npm run build:client
+npm run test:client
+```
+
+- **Test environment:** helper and client tests do not launch a browser. The server test binds a temporary loopback port.
+- **Synthetic recovery:** `make check` runs C++ unit tests and checks unshifted delays of 40, 85, 150 and 450 ms, with varied gain, noise and pre-roll. All 20 events must pass; median error must be <=0.1 ms and each event's error <=0.25 ms.
+- **Negative controls:** disconnected-return and silent-reference fixtures must accept no events. The analyzer exits with status 3 when no events pass its gates.
+- **Scope:** these tolerances apply to the specified ideal fixtures, not to physical recordings.
+
+### Re-analyze recordings and regenerate figures
+
+```bash
+make -C rig
+bash experiments/compare-rig-runs.sh
+python3 -m venv .venv-figures
+.venv-figures/bin/python -m pip install -r experiments/requirements-figures.txt
+.venv-figures/bin/python experiments/plot-rig.py
+```
+
+- `compare-rig-runs.sh` prints per-capture summaries.
+- `plot-rig.py` independently re-analyzes all five WAVs, checks every generated row against the archived `*-uncalibrated.csv` files, prints descriptive statistics and writes both PNGs under `docs/figures/`.
+- Archived WAVs and CSVs are not overwritten. See the [data notes](experiments/data/README-rig-csv.md) for the shifted CSV variant.
+
+### Historical telemetry tables
+
+```bash
+python3 experiments/aggregate.py
+```
+
+The script prints seven groups: formation/KPI/uplink, mobility, packet-gap results, sensing, network conditions, grace windows and DTX. It preserves these selection rules:
+
+| Data | Selection rule |
+|---|---|
+| Formation/KPI/uplink | Last lexicographically sorted summary file per client count |
+| Mobility | Complete cycles |
+| Legacy packet gaps | Records with `valid: true` |
+| Remote telemetry | Latest timestamped report per `(condition, session)` |
+| Grace sweep | Nonnegative reconnect gaps, independently of whole-run validity |
+
+Inspect these filters when interpreting sample sizes.
+
+- **Interpretation:** aggregation reproduces stored telemetry; it does not validate every label or measurement.
+- **Packet gaps:** legacy `totalSilenceMs` does not establish audible interruption. The artifact's harness and stored record formats differ, and its stop-plus-recovery arithmetic omitted the absence interval. Revised packet-gap records use a separate format and are excluded from these tables.
+- **Latency:** report single-host loopback and real-network software estimates separately.
 
 ## Pilot results
 
@@ -116,118 +206,7 @@ TO DO:
 
 Numerical reproduction is available. Physical timing accuracy and generalized endpoint calibration remain to be established.
 
-## Offline reproduction
-
-Run all commands below from the repository root.
-
-| Component | Requirement |
-|---|---|
-| Rig and recovery tests | C++17 compiler, `make`, Python >= 3.9 |
-| TypeScript tests | Node.js >= 22.12 and dependencies installed with `npm ci` |
-| Helper tests | Node.js >= 18; no browser/application needed |
-| Historical aggregation | Python >= 3.9, standard library only |
-| Figures | Python >= 3.9 and Matplotlib (requirements file below) |
-
-### Build and test
-
-```bash
-make -C rig check
-npm ci
-npm test
-npm run typecheck
-node --test experiments/lib/*.test.cjs
-npm run build:client
-npm run test:client
-```
-
-- **Test environment:** helper and client tests do not launch a browser. The server test binds a temporary loopback port.
-- **Synthetic recovery:** `make check` runs C++ unit tests and checks unshifted delays of 40, 85, 150 and 450 ms, with varied gain, noise and pre-roll. All 20 events must pass; median error must be <=0.1 ms and each event's error <=0.25 ms.
-- **Negative controls:** disconnected-return and silent-reference fixtures must accept no events. The analyzer exits with status 3 when no events pass its gates.
-- **Scope:** these tolerances apply to the specified ideal fixtures, not to physical recordings.
-
-### Re-analyze recordings and regenerate figures
-
-```bash
-make -C rig
-bash experiments/compare-rig-runs.sh
-python3 -m venv .venv-figures
-.venv-figures/bin/python -m pip install -r experiments/requirements-figures.txt
-.venv-figures/bin/python experiments/plot-rig.py
-```
-
-- `compare-rig-runs.sh` prints per-capture summaries.
-- `plot-rig.py` independently re-analyzes all five WAVs, checks every generated row against the archived `*-uncalibrated.csv` files, prints descriptive statistics and writes both PNGs under `docs/figures/`.
-- Archived WAVs and CSVs are not overwritten. See the [data notes](experiments/data/README-rig-csv.md) for the shifted CSV variant.
-
-### Historical telemetry tables
-
-```bash
-python3 experiments/aggregate.py
-```
-
-The script prints seven groups: formation/KPI/uplink, mobility, packet-gap results, sensing, network conditions, grace windows and DTX. It preserves these selection rules:
-
-| Data | Selection rule |
-|---|---|
-| Formation/KPI/uplink | Last lexicographically sorted summary file per client count |
-| Mobility | Complete cycles |
-| Legacy packet gaps | Records with `valid: true` |
-| Remote telemetry | Latest timestamped report per `(condition, session)` |
-| Grace sweep | Nonnegative reconnect gaps, independently of whole-run validity |
-
-Inspect these filters when interpreting sample sizes.
-
-- **Interpretation:** aggregation reproduces stored telemetry; it does not validate every label or measurement.
-- **Packet gaps:** legacy `totalSilenceMs` does not establish audible interruption. The artifact's harness and stored record formats differ, and its stop-plus-recovery arithmetic omitted the absence interval. Revised packet-gap records use a separate format and are excluded from these tables.
-- **Latency:** report single-host loopback and real-network software estimates separately.
-
-## Live experiments
-
-### Start the client and room server
-
-`npm run start:client` starts the included server. It serves the browser client, manages room membership and tile positions, and relays voice signalling and measurement messages. Audio travels through WebRTC, directly or through TURN; no separate game server is needed.
-
-Run from the repository root:
-
-```bash
-npm ci
-npm run build:client
-npm run start:client
-```
-
-- **Local access:** the default server is available at `http://localhost:5001` on the Mac. It listens only on loopback; this address is not a phone-accessible setup.
-- **Two-device access:** configure a reachable HTTPS address trusted by the phone, using the [TLS or reverse-proxy instructions](client/README.md#start-the-client). Use that address on both devices. Plain HTTP to the Mac's LAN address does not provide phone microphone access.
-- **Manual audio check:** join the same room with different participant names, then enable voice and grant microphone permission on both devices. The [client instructions](client/README.md) also cover optional TURN and supported scenarios.
-- **Automated rig capture:** join and enable voice on the phone with `?wsnmeasure=1`, keeping its page visible and the phone awake. Set `BASE_URL` to the same HTTPS address and room. The harness opens and joins the Mac sender automatically; close any manually joined Mac participant first. Harnesses use this repository's Playwright dependency and installed standard Chrome.
-- **Physical rig:** Mac captures require `afplay`, `ffmpeg` with AVFoundation support, `SwitchAudioSource`, and the wiring in the [runsheet](experiments/RUNSHEET-rig.md).
-
-### Supported host and interfaces
-
-- **Minimal client:** omits game UI and conversation APIs. Its bundle does not load `HomeScreen.ts`, `VoiceChat.ts` or the conversation VAD helper. `DebugFlags.ts` supplies the logging toggle.
-- **Full game:** requires the external client/server and the fuller controller on `revision/measurement-documentation`. The minimal controller is not a drop-in replacement. `TS_CLIENT` is an optional dependency-location override for that installation.
-- **Comparison with the pilot:** removing the game workload changes the experimental conditions. Validate a new baseline before comparing results.
-
-| Runtime interface | Purpose |
-|---|---|
-| `wsnGame.loggedIn()`, `pos()`, `teleport()` | Login and controlled movement |
-| `wsnVoice.kpis()` | Retained per-link KPI summary |
-| `wsnVoiceCtl.audioStats()` | Identified audio streams, counters, timestamps and selected ICE-pair joins |
-| `wsnVoiceCtl.receiverStats(peerIndex, captureId)` | Opt-in stats from the remote receiver over the signalling relay |
-| `wsnVoiceCtl.rxAudio()` | Legacy aggregate diagnostic; new experiments use identified stats |
-| `wsnVoiceCtl.peers()`, `peerIndices()`, `linkDebug()` | Peer and connection diagnostics |
-| `wsnVoiceCtl.setGrace(ms)`, `grace()` | Apply and verify the grace window on both endpoints |
-| `wsnSense.stats()`, `dump()`, `energy()` | Position/link sensing and measured or modelled energy level |
-
-`wsnVoice.setCalibrationMs(C)` remains a manual additive-offset API; calling it sets a software flag, not a scientific validation status. The revised capture driver does not call it or shift acoustic results to match software.
-
-### Run a capture or packet-gap experiment
-
-After starting the host and configuring the devices:
-
-```bash
-node experiments/rig-driver.cjs --runs 5 --amp 0.4
-node experiments/audiogap.cjs 9
-```
+## Measurement reference
 
 ### Capture files and receiver telemetry
 
@@ -248,11 +227,53 @@ node experiments/audiogap.cjs 9
 - **Bandwidth:** rates use per-stream byte and timestamp differences and become unavailable after stream changes, counter resets or missing reports. A grace absence rate spans the baseline and final absence snapshots, with their command/probe uncertainty; a closed connection makes that whole-window rate unavailable.
 - **Interpretation:** these polling proxies depend on browser stats refresh and command timing; they do not establish audible silence. Peer retention means presence at every sampled poll, not proof of uninterrupted connectivity.
 
+### Supported host and interfaces
+
+- **Minimal client:** omits game UI and conversation APIs. Its bundle does not load `HomeScreen.ts`, `VoiceChat.ts` or the conversation VAD helper. `DebugFlags.ts` supplies the logging toggle.
+- **Full game:** requires the external client/server and the fuller controller on `revision/measurement-documentation`. The minimal controller is not a drop-in replacement. `TS_CLIENT` is an optional dependency-location override for that installation.
+- **Comparison with the pilot:** removing the game workload changes the experimental conditions. Validate a new baseline before comparing results.
+
+| Runtime interface | Purpose |
+|---|---|
+| `wsnGame.loggedIn()`, `pos()`, `teleport()` | Login and controlled movement |
+| `wsnVoice.kpis()` | Retained per-link KPI summary |
+| `wsnVoiceCtl.audioStats()` | Identified audio streams, counters, timestamps and selected ICE-pair joins |
+| `wsnVoiceCtl.receiverStats(peerIndex, captureId)` | Opt-in stats from the remote receiver over the signalling relay |
+| `wsnVoiceCtl.rxAudio()` | Legacy aggregate diagnostic; new experiments use identified stats |
+| `wsnVoiceCtl.peers()`, `peerIndices()`, `linkDebug()` | Peer and connection diagnostics |
+| `wsnVoiceCtl.setGrace(ms)`, `grace()` | Apply and verify the grace window on both endpoints |
+| `wsnSense.stats()`, `dump()`, `energy()` | Position/link sensing and measured or modelled energy level |
+
+`wsnVoice.setCalibrationMs(C)` remains a manual additive-offset API; calling it sets a software flag, not a scientific validation status. The revised capture driver does not call it or shift acoustic results to match software.
+
 ### Validation and SFU comparison
 
 - **Live validation:** the minimal build includes the revised controller at both endpoints. Missing APIs and failed probes are errors. Automated checks do not replace a two-device microphone/playout smoke test or physical rig validation. The game conversation protocol and scene-specific behaviour are outside this host.
 - **SFU setup:** the standalone SFU in `experiments/baseline/` forwards RTP without decoding or mixing audio. Install dependencies with `npm install --prefix experiments/baseline`, then run `node experiments/baseline.cjs`.
 - **SFU measurement limits:** candidate-pair RTT is a network proxy, not measured end-to-end audio delay. The field name `serverMixedOneWayMs` does not establish mixing or validated one-way timing.
+
+## Repository layout
+
+```text
+client/                  Minimal browser host, signalling server and source provenance
+voice/                   TypeScript voice, negotiation, sensing and KPI modules
+rig/                     C++17 stimulus generator, stereo WAV analyzer and fixtures
+  tests/                 C++ DSP/WAV unit tests and Python synthetic recovery checks
+experiments/
+  lib/                   Browser helpers, tone generation and measurement helpers/tests
+  rig-driver.cjs         Live Mac/phone capture; unshifted analysis and run manifests
+  audiogap.cjs           Revised packet-interruption proxy (not audible silence)
+  RUNSHEET-rig.md        Wiring, revised capture procedure and pilot limitations
+  compare-rig-runs.sh    Re-analyze archived WAVs and print capture summaries
+  plot-rig.py            Re-analyze WAVs, verify raw CSVs and regenerate both figures
+  aggregate.py           Print historical telemetry summaries with existing filters
+  baseline/              RTP-forwarding SFU comparison (werift + ws; no audio mixing)
+  data/                  134 historical JSON/JSONL files and five WAV/CSV capture sets
+  runs/                  New rig/packet-gap outputs (generated, ignored by Git)
+docs/figures/            Architecture and reproducible pilot figures
+```
+
+Other harnesses cover formation (`harness.cjs`), mobility, grace windows, DTX, sensing, and failure diagnostics. Their read-only controller probes are listed under [supported host and interfaces](#supported-host-and-interfaces).
 
 ## License
 
