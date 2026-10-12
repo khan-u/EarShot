@@ -107,7 +107,7 @@ The [EarShot artifact (`ea7d2c6`)](https://github.com/khan-u/prox-voice/tree/ea7
 
 **Unresolved timing discrepancy:** recorded reference-event spacing is approximately 1.53–1.77 s, despite a nominal 2 s stimulus period. Capture durations and event counts also differ from the nominal sequence. Recording continuity, stimulus configuration and time-base accuracy need physical checks; a global rescaling is not justified.
 
-Before extending the manuscript's claims:
+TO DO:
 
 - Validate the rig using independent timing, crosstalk and disconnected-return controls.
 - Collect receiver telemetry matched by direction and time, with build identifiers.
