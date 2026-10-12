@@ -1,12 +1,12 @@
 // PROX-VOICE acoustic loopback rig — synthetic recording (test fixture).
 //
-// Fabricates the stereo WAV the real rig would capture, so the analyzer can be
-// validated with no hardware. Channel 0 is the stimulus at its true birth time
+// Constructs an ideal delayed-copy fixture for numerical recovery tests.
+// This does not model or validate the physical rig. Channel 0 is the stimulus
 // (the zero-delay wired reference); channel 1 is the same stimulus delayed by a
 // known amount, attenuated, and buried in Gaussian noise (the acoustic mic
 // path). Equal pre-roll silence is prepended to both channels to mimic an
 // arbitrary record start — that common offset must cancel in the measured
-// latency, which is a genuine validity check. Run analyze on the output and
+// latency. Run analyze without median alignment on the output and
 // confirm it recovers --delay-ms.
 #include "wav.hpp"
 #include <cmath>

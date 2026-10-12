@@ -15,6 +15,11 @@ rig/rig_latency.csv
 
 # Generated audio fixtures (reproduced by ensureToneWav / ensureSpeechWav on first run)
 experiments/assets/
+experiments/runs/
+
+# Local figure environment
+.venv-figures/
+__pycache__/
 
 # OS
 .DS_Store

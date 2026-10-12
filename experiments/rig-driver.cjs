@@ -14,30 +14,30 @@
  *   ffmpeg records the UCA202 explicitly by avfoundation index (default 1).
  *
  * Like the other experiments/ harnesses, this requires a ts-client checkout,
- * which is not part of this repository; it documents the exact orchestration
- * of the live captures. The analysis chain is reproducible standalone: rig/
+ * which is not part of this repository. This revised driver saves raw results
+ * separately from the historical pilot artifacts. The analysis chain is reproducible standalone: rig/
  * (stimulus, analyze, self-test) plus the archived captures in data/ re-derive
- * every reported number via compare-rig-runs.sh.
+ * the per-capture latency summaries via compare-rig-runs.sh.
  *
  * Usage:
  *   TS_CLIENT=<ts-client checkout> node rig-driver.cjs --dry
  *       # validate: launch A, login, enable voice, reach the peer-wait gate. No
  *       # audio switching, no capture. Safe to run without the phone/wiring.
- *   node rig-driver.cjs [--secs N] [--bursts N] [--audio-index 1] [--no-restore]
+ *   node rig-driver.cjs [--secs N] [--bursts N] [--amp 0.7] [--audio-index 1] [--no-restore]
  *       # full run: waits for the phone peer, then captures + analyzes.
  */
 "use strict";
 const path = require("path");
-const os = require("os");
+const fs = require("fs");
 const { spawn, spawnSync, execFileSync } = require("child_process");
+const { stimulusArgs, analyzeCapture } = require("./lib/rig-analysis.cjs");
 
 // ── config ──────────────────────────────────────────────────────────────────
-const HOME = os.homedir();
 const TS_CLIENT = process.env.TS_CLIENT;
 if (!TS_CLIENT) { console.error("set TS_CLIENT=<path to the ts-client checkout> (playwright-core + chromium come from its node_modules)"); process.exit(1); }
 const BASE = process.env.BASE_URL || "http://localhost:5001";
 const RIG = process.env.RIG_DIR || path.join(__dirname, "..", "rig");
-const DATA = path.join(__dirname, "data");
+const DATA = process.env.RIG_DATA_DIR || path.join(__dirname, "runs");
 
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(name);
@@ -48,10 +48,14 @@ const AUDIO_INDEX = opt("--audio-index", null);          // explicit avfoundatio
 const OUT_DEV = process.env.RIG_OUT_DEV || "USB Audio CODEC";
 const IN_DEV = process.env.RIG_IN_DEV || "MacBook Pro Microphone";
 const BURSTS = parseInt(opt("--bursts", "60"), 10);      // 60 * 2 s = 120 s
+const AMPLITUDE = Number(opt("--amp", "0.7"));
+stimulusArgs(BURSTS, AMPLITUDE, "stimulus.wav"); // Fail before changing audio devices.
 const SECS = parseInt(opt("--secs", String(BURSTS * 2 + 6)), 10);  // capture window (+tail)
 const NO_RESTORE = flag("--no-restore");
 const PEER_WAIT_MS = parseInt(opt("--peer-wait", "600"), 10) * 1000;  // default 10 min
 const RUNS = parseInt(opt("--runs", "1"), 10);           // captures per session (login once, replicate N times)
+if (!Number.isInteger(SECS) || SECS < 1 || !Number.isInteger(RUNS) || RUNS < 1 ||
+    !Number.isFinite(PEER_WAIT_MS) || PEER_WAIT_MS <= 0) throw new Error("invalid capture duration, run count, or peer wait");
 // A non-localhost BASE may sit behind an interactive access gate that cannot
 // be filled programmatically. Pause after navigation; the operator clears the
 // gate in the browser window and presses ENTER to resume. Force on/off with
@@ -66,7 +70,7 @@ let audioIndex = null;   // avfoundation index of the UCA202, resolved at run st
 const UID = Date.now().toString(36).slice(-6);
 // ISO run stamp for archived artifacts (rig-rec-<STAMP>.wav); sortable and
 // unique per run.
-const runStamp = () => new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+const runStamp = () => new Date().toISOString().replace(/[:.]/g, "-");
 // Fixed account, reused across runs; the first run creates it and the server
 // kicks a lingering previous session on re-login. Override with RIG_USER /
 // RIG_PASS.
@@ -166,50 +170,101 @@ function run(cmd, args, opts = {}) {
     return r;
 }
 
+function record(args) {
+    log("$ ffmpeg", args.join(" "));
+    return new Promise(resolve => {
+        const child = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+        let stdout = "", stderr = "";
+        child.stdout.on("data", chunk => { stdout += chunk; });
+        child.stderr.on("data", chunk => { stderr += chunk; });
+        child.once("error", error => resolve({ status: null, stdout, stderr: stderr + String(error) }));
+        child.once("close", status => resolve({ status, stdout, stderr }));
+    });
+}
+
 async function capture(page, runIdx) {
-    const stim = path.join(RIG, "stimulus.wav");
-    const rec = path.join(RIG, "rec.wav");
-    // (Re)generate the click-train at the requested length.
-    run(path.join(RIG, "stimulus"), ["--bursts", String(BURSTS), "--out", stim]);
-
-    log(`playing stimulus + recording UCA202 (avf index ${audioIndex}) for ${SECS}s…`);
-    const af = spawn("afplay", [stim], { stdio: "ignore" });
-    const ff = spawnSync("ffmpeg", ["-y", "-f", "avfoundation", "-i", `:${audioIndex}`, "-ar", "48000", "-ac", "2", "-t", String(SECS), rec], { stdio: ["ignore", "inherit", "inherit"] });
-    try { af.kill(); } catch (_) {}
-    if (ff.status !== 0) { log("ffmpeg failed — check the UCA202 index and wiring"); return; }
-
-    // Read the software mouth-to-ear median to calibrate against.
-    let latRaw = -1;
-    try { const k = await page.evaluate(() => window.wsnVoice.kpis()); latRaw = k && k.latRawMedianMs; log("software latRawMedianMs =", latRaw); } catch (e) { log("WARN could not read kpis:", String(e).slice(0, 100)); }
-
-    // --min-lag-ms 30: electrical crosstalk of the reference into ch1
-    // correlates near 0 ms and can outscore a weak acoustic return; no real
-    // mouth-to-ear path is under 30 ms, so floor the lag search there.
-    const aArgs = [rec, "--min-corr", "0.9", "--min-lag-ms", "30", "--csv", path.join(RIG, "rig_latency.csv")];
-    if (latRaw > 0) aArgs.push("--est-median", String(latRaw));
-    const a = run(path.join(RIG, "analyze"), aArgs);
-    const m = a.stdout && a.stdout.match(/calibration offset:\s*(-?\d+(?:\.\d+)?)\s*ms/);
-    // Raw rig median from "(median RAW → EST ms)"; C = −offset (the tool prints
-    // est−measured; the device-class constant is measured−est).
-    const rawM = a.stdout && a.stdout.match(/\(median\s+(-?\d+(?:\.\d+)?)\s+\u2192/);
-    const rigMedian = rawM ? parseFloat(rawM[1]) : null;
-    let C = null;
-    if (m) {
-        C = -parseFloat(m[1]);
-        log(`\n*** run ${runIdx}: device-class constant C = ${C} ms (rig ${rigMedian != null ? rigMedian : "?"} − software ${latRaw}) ***`);
-        try { await page.evaluate((c) => window.wsnVoice.setCalibrationMs(c), C); log("applied wsnVoice.setCalibrationMs(C) on Device A"); } catch (_) {}
-    }
-    // Archive alongside the study data, one timestamped pair per capture.
     const stamp = runStamp();
-    try { run("cp", [rec, path.join(DATA, `rig-rec-${stamp}.wav`)]); run("cp", [path.join(RIG, "rig_latency.csv"), path.join(DATA, `rig-latency-${stamp}.csv`)]); } catch (_) {}
-    log("saved rec + CSV to", DATA);
-    return { stamp, rigMedian, software: latRaw > 0 ? latRaw : null, C };
+    const directory = path.join(DATA, `rig-${stamp}`);
+    fs.mkdirSync(directory, { recursive: true });
+    const stim = path.join(directory, "stimulus.wav");
+    const rec = path.join(directory, "recording.wav");
+    const csv = path.join(directory, "latency-uncalibrated.csv");
+    const git = (...args) => {
+        try { return execFileSync("git", ["-C", path.join(__dirname, ".."), ...args], { encoding: "utf8" }).trim(); }
+        catch (_) { return null; }
+    };
+    const status = git("status", "--porcelain");
+    const manifest = {
+        schemaVersion: 2, startedAt: new Date().toISOString(), status: "incomplete",
+        repositoryCommit: git("rev-parse", "HEAD"), repositoryDirty: status == null ? null : status !== "",
+        applicationBuildId: process.env.APP_BUILD_ID || null,
+        applicationBuildIdSource: "operator-supplied; not independently verified",
+        bursts: BURSTS, amplitude: AMPLITUDE, periodSeconds: 2, captureSeconds: SECS,
+        sampleRateHz: 48000, channels: 2, audioIndex,
+        minCorrelation: .9, minQualityDb: 6, minLagMs: 30, maxLagMs: 1000,
+        returnEndpoint: "phone adapter electrical output",
+        senderDiagnostic: null,
+    };
+    let playback = null;
+    let playbackDone = null;
+    try {
+        manifest.stimulusArguments = stimulusArgs(BURSTS, AMPLITUDE, stim);
+        const generation = run(path.join(RIG, "stimulus"), manifest.stimulusArguments);
+        if (generation.status !== 0) throw new Error("stimulus generation failed");
+        log(`playing stimulus + recording UCA202 (avf index ${audioIndex}) for ${SECS}s…`);
+        playback = spawn("afplay", [stim], { stdio: "ignore" });
+        playbackDone = new Promise(resolve => {
+            playback.once("error", error => resolve({ error: String(error) }));
+            playback.once("close", (code, signal) => resolve({ code, signal }));
+        });
+        await new Promise((resolve, reject) => {
+            playback.once("spawn", resolve);
+            playback.once("error", reject);
+        });
+        manifest.recorderArguments = ["-y", "-f", "avfoundation", "-i", `:${audioIndex}`,
+            "-ar", "48000", "-ac", "2", "-t", String(SECS), rec];
+        const ff = await record(manifest.recorderArguments);
+        fs.writeFileSync(path.join(directory, "recorder.log"), (ff.stdout || "") + (ff.stderr || ""));
+        if (playback.exitCode == null) playback.kill();
+        manifest.playback = await playbackDone;
+        manifest.recorderExitStatus = ff.status;
+        if (ff.status !== 0) throw new Error("ffmpeg failed; see recorder.log");
+        if (manifest.playback.error || manifest.playback.code !== 0) throw new Error("stimulus playback failed or was truncated; inspect capture timing");
+
+        // This laptop KPI observes local inbound traffic, not the measured
+        // forward return at the phone. Keep it as an unmatched diagnostic.
+        try {
+            const k = await page.evaluate(() => window.wsnVoice.kpis());
+            manifest.senderDiagnostic = { observedAt: new Date().toISOString(),
+                latRawMedianMs: Number.isFinite(k?.latRawMedianMs) ? k.latRawMedianMs : null,
+                role: "post-capture laptop inbound KPI; direction/window unmatched" };
+        } catch (error) { manifest.senderDiagnostic = { error: String(error) }; }
+        const analysis = analyzeCapture(RIG, rec, csv);
+        manifest.analysisArguments = analysis.args;
+        manifest.analysisExitStatus = analysis.exitStatus;
+        manifest.rawSummary = analysis.summary;
+        fs.writeFileSync(path.join(directory, "analysis.log"), (analysis.stdout || "") + (analysis.stderr || ""));
+        manifest.status = analysis.summary.kept ? "analyzed" : "no-accepted-events";
+        if (!analysis.summary.kept) throw new Error("no events passed the gates; recording and CSV retained");
+        log(`run ${runIdx}: unshifted median=${analysis.summary.medianMs} ms; kept=${analysis.summary.kept}/${analysis.summary.analyzed}`);
+        return { stamp, rigMedian: analysis.summary.medianMs };
+    } catch (error) {
+        manifest.error = String(error);
+        if (manifest.status === "incomplete") manifest.status = "failed";
+        throw error;
+    } finally {
+        if (playback && playback.exitCode == null) playback.kill();
+        if (playbackDone) manifest.playback = await playbackDone;
+        manifest.finishedAt = new Date().toISOString();
+        fs.writeFileSync(path.join(directory, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+        log("capture artifacts saved to", directory);
+    }
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
 (async () => {
     log(`Device-A driver | BASE=${BASE} | TS_CLIENT=${TS_CLIENT} | RIG=${RIG}`);
-    log(DRY ? "MODE: dry (validate login + peer gate; no audio switch, no capture)" : `MODE: full run (bursts=${BURSTS}, capture=${SECS}s)`);
+    log(DRY ? "MODE: dry (validate login + peer gate; no audio switch, no capture)" : `MODE: full run (bursts=${BURSTS}, amplitude=${AMPLITUDE}, capture=${SECS}s)`);
 
     let prevOut = null, prevIn = null;
     if (!DRY) {
@@ -339,12 +394,10 @@ async function capture(page, runIdx) {
             if (r) results.push(r);
         }
         if (results.length > 1) {
-            const cs = results.filter((r) => r.C != null).map((r) => r.C);
-            const rms = results.filter((r) => r.rigMedian != null).map((r) => r.rigMedian);
-            const mean = (arr) => arr.reduce((x, y) => x + y, 0) / arr.length;
-            log("\n=== ensemble over " + results.length + " capture(s) ===");
-            for (const r of results) log(`  ${r.stamp}  rig=${r.rigMedian}ms  software=${r.software}ms  C=${r.C != null ? r.C.toFixed(1) : "?"}ms`);
-            if (cs.length > 1) log(`  C: mean=${mean(cs).toFixed(1)}ms  spread=${(Math.max(...cs) - Math.min(...cs)).toFixed(1)}ms  |  rig: mean=${mean(rms).toFixed(1)}ms  spread=${(Math.max(...rms) - Math.min(...rms)).toFixed(1)}ms`);
+            const medians = results.map(r => r.rigMedian);
+            const mean = medians.reduce((x, y) => x + y, 0) / medians.length;
+            log(`ensemble: ${medians.length} capture medians, mean=${mean.toFixed(3)} ms`);
+            for (const r of results) log(`  ${r.stamp} unshifted median=${r.rigMedian} ms`);
         }
         log("done.");
         await cleanup();

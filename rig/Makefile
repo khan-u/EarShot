@@ -1,5 +1,6 @@
 CXX      ?= c++
 CXXFLAGS ?= -O2 -std=c++17 -Wall -Wextra
+PYTHON   ?= python3
 
 BINS = stimulus analyze synth_recording
 TESTS = tests/test_dsp tests/test_wav
@@ -25,12 +26,8 @@ unit: $(TESTS)
 	./tests/test_dsp
 	./tests/test_wav
 
-# Self-test: synthesise a recording with a known 85 ms delay, analyse it, and
-# confirm the rig recovers the ground truth within 1 bin (10 ms, the default
-# histogram resolution).
+# Numerical recovery checks on synthetic fixtures; no median alignment.
 check: all unit
-	./stimulus --bursts 20 --out stimulus.wav
-	./synth_recording --in stimulus.wav --out synth_rec.wav --delay-ms 85 --gain 0.5 --noise 0.03
-	./analyze synth_rec.wav --est-median 60 --csv rig_latency.csv
+	$(PYTHON) tests/check_recovery.py
 
 .PHONY: all unit check

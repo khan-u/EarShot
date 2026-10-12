@@ -1,14 +1,12 @@
 // PROX-VOICE acoustic loopback rig — cross-correlation analyzer.
 //
 // Input: one stereo WAV recorded on a single clock, so no clock sync is needed.
-// Channel 0 (ref) is the wired split of the stimulus at the instant each click
-// is born; channel 1 (mic) is the microphone at device B's speaker — the same
-// click after crossing A's capture stack, the mesh link under test, and B's
-// playout stack. The gap between a ref click and its mic echo is the
-// mouth-to-ear latency.
+// Channel 0 is the wired stimulus reference. Channel 1 is the return: the pilot
+// used the phone adapter's electrical output, not a listener-side microphone.
+// Physical endpoint coverage and timing accuracy require separate validation.
 //
 // Pipeline: band-pass both channels around 2 kHz, envelope-detect, locate each
-// stimulus click in ref, then for each click find the first strong
+// stimulus click in ref, then for each click find the highest
 // cross-correlation peak in mic within a search window. The DSP itself lives in
 // dsp.hpp; this file is the pipeline, the quality gates, and the reporting.
 #include "wav.hpp"
@@ -28,7 +26,7 @@ struct Params {
     double freq = 2000, q = 4, envMs = 2, winMs = 30, preMs = 5, maxLagMs = 1000, minLagMs = 0;
     double thrFrac = 0.30, minDb = 6.0, minCorr = 0.5, histBinMs = 10.0;
     std::string csvPath;
-    double estMedian = -1;   // -1 = no calibration; >= 0 → apply offset so median == estMedian
+    double estMedian = -1;   // Legacy median alignment; not an accuracy check.
 };
 
 void printHelp(const char* prog) {
@@ -43,13 +41,13 @@ void printHelp(const char* prog) {
         "  --win-ms T        NCC window length in ms (default 30)\n"
         "  --pre-ms T        pre-roll before click onset in ms (default 5)\n"
         "  --max-lag-ms T    maximum expected latency in ms (default 1000)\n"
-        "  --min-lag-ms T    minimum plausible latency in ms (default 0; gate out\n"
-        "                    lag~0 electrical crosstalk of the reference into ch1)\n"
+        "  --min-lag-ms T    lower search bound in ms (default 0)\n"
         "  --thr-frac F      click detection threshold fraction of peak (default 0.30)\n"
-        "  --min-db D        minimum echo SNR in dB for quality gate (default 6)\n"
+        "  --min-db D        selected envelope / initial RMS threshold (default 6 dB)\n"
         "  --min-corr C      minimum NCC for quality gate (default 0.5)\n"
         "  --hist-bin-ms T   histogram bin width in ms (default 10)\n"
-        "  --est-median M    apply calibration offset so measured median == M ms\n"
+        "  --est-median M    legacy alignment: shift CSV/summary median to M ms;\n"
+        "                    does not validate physical timing or calibration\n"
         "  --csv FILE        write per-burst CSV to FILE\n",
         prog);
 }
@@ -85,6 +83,7 @@ bool parseArgs(int argc, char** argv, Params& p) {
 std::vector<size_t> findClicks(const std::vector<float>& refEnv, double fs, double thrFrac, double maxLagMs) {
     double mx = 0.0;
     for (float v : refEnv) { mx = std::max(mx, (double)v); }
+    if (mx <= 0.0) return {};
     const double thr = thrFrac * mx;
     const size_t minGap = (size_t)(maxLagMs / 1000.0 * fs * 1.5 + 1);   // 1.5× search window: guard so an echo can't be mistaken for the next click onset
 
@@ -136,6 +135,10 @@ int main(int argc, char** argv) {
     std::string err;
     if (!rigwav::read(p.path, w, &err)) { fprintf(stderr, "read failed: %s\n", err.c_str()); return 1; }
     if (w.channels < 2) { fprintf(stderr, "need a stereo recording (ref + mic); got %u channel(s)\n", w.channels); return 1; }
+    if (w.frames() == 0 || p.refCh < 0 || p.micCh < 0 ||
+        p.refCh >= w.channels || p.micCh >= w.channels) {
+        fprintf(stderr, "empty recording or channel index out of range\n"); return 2;
+    }
 
     const double fs = (double)w.sampleRate;
     const size_t F = w.frames();
@@ -158,7 +161,6 @@ int main(int argc, char** argv) {
 
     printf("PROX-VOICE loopback rig — input %s (%.1f s, %u ch @ %.0f Hz), clicks found: %zu\n",
            p.path.c_str(), (double)F / fs, w.channels, fs, peaks.size());
-    if (peaks.empty()) return 0;
 
     // Decimate for the cross-correlation search (lower rate → shorter NCC windows,
     // faster search). Full-rate envelope used only for click detection above.
@@ -166,8 +168,8 @@ int main(int argc, char** argv) {
     std::vector<float> micD = rigdsp::decimate(micEnv, p.decim);
     const double fsD = fs / (double)p.decim;
 
-    // Noise floor: RMS of the first 0.5 s of the decimated mic envelope, before any
-    // click arrives — used as the reference level for the quality-gate dB check.
+    // Initial RMS: first 0.5 s (or a quarter of a short recording). A click in
+    // this interval contaminates the reference; this is not a local echo SNR.
     const size_t noiseWin = std::min((size_t)(0.5 * fsD), micD.size() / 4);
     double noiseSum = 0.0;
     for (size_t i = 0; i < noiseWin; i++) { noiseSum += (double)micD[i] * micD[i]; }
@@ -222,14 +224,14 @@ int main(int argc, char** argv) {
                (int)bi + 1, (double)peaks[bi] / fs, latencyMs, bestCorr, qDb, kept ? "Y" : "-");
     }
 
-    // Calibration offset: shift all measurements so the kept median matches the
-    // known ground-truth (--est-median).  Applied before statistics and CSV.
+    // Legacy alignment: shift all measurements to the supplied median. This
+    // forces agreement and is not evidence of independent timing accuracy.
     std::vector<double> keptMs;
     for (const auto& b : bursts) { if (b.kept) keptMs.push_back(b.latencyMs); }
     double calOffset = 0.0;
     if (p.estMedian >= 0 && !keptMs.empty()) {
         calOffset = p.estMedian - rigdsp::percentile(keptMs, 50.0);
-        printf("\ncalibration offset: %.3f ms  (median %.2f → %.2f ms)\n",
+        printf("\nmedian-alignment offset (not a validation): %.3f ms  (median %.2f → %.2f ms)\n",
                calOffset, rigdsp::percentile(keptMs, 50.0), p.estMedian);
         for (auto& b : bursts) { b.latencyMs += calOffset; }
         for (auto& v : keptMs) { v += calOffset; }
@@ -240,6 +242,7 @@ int main(int argc, char** argv) {
         FILE* csv = fopen(p.csvPath.c_str(), "w");
         if (!csv) {
             fprintf(stderr, "cannot open csv: %s\n", p.csvPath.c_str());
+            return 1;
         } else {
             fprintf(csv, "burst,t_ref_s,latency_ms,corr_peak,quality_db,kept\n");
             for (const auto& b : bursts) {
@@ -254,7 +257,7 @@ int main(int argc, char** argv) {
     if (keptMs.empty()) {
         printf("\nno bursts passed both quality gates (minDb=%.1f minCorr=%.2f)\n",
                p.minDb, p.minCorr);
-        return 0;
+        return 3;
     }
 
     // Summary statistics over kept bursts.

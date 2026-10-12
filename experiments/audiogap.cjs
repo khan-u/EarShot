@@ -1,31 +1,24 @@
 /**
- * Audio-gap harness — listener-perceived silence during an out-and-back trip.
- *
- * Two clients form the mesh. Client A is the sender (tone WAV injected via
- * --use-file-for-fake-audio-capture); B is the listener. A teleports WEST
- * beyond the proximity radius for ABSENCE_MS, then returns. The harness times
- * how long B's inbound packet stream stalls (audio stop) and how long it takes
- * to recover (audio gap) using packetsReceived as the detector — loudness-
- * independent, so it works even when Opus mutes the encoder.
- *
- * Valid runs: both tStop and tResume must be captured and the stop must track
- * A's departure closely. The valid flag gates aggregate.py's audiogap() filter;
- * invalid runs are archived but excluded from statistics.
- *
- * Usage:  node audiogap.cjs [absenceSec]    (default 9)
+ * Packet-interruption proxy during an out-and-back trip, schema version 2.
+ * Two clients, a continuous injected tone, serial packet-counter polling.
+ * This does not measure listener-perceived silence or physical playout.
+ * Usage from repository root: node experiments/audiogap.cjs [absenceSec]
  */
 const path = require("path");
 const fs   = require("fs");
-const os   = require("os");
+const { performance } = require("node:perf_hooks");
+const { PacketGap, readRxPackets } = require("./lib/packet-gap.cjs");
 const { TS_CLIENT, FAKE_MEDIA_ARGS, sleep, log, bootContext, loginPage } = require("./lib/wsn-client.cjs");
 const { ensureToneWav }  = require("./lib/tonegen.cjs");
 const { chromium } = require(path.join(TS_CLIENT, "node_modules", "playwright-core"));
 
 const BASE         = process.env.BASE_URL || "http://127.0.0.1:5001";
-const ABSENCE_MS   = Math.max(3, parseInt(process.argv[2] || "9", 10)) * 1000;
-const STALL_MS     = 1200;   // packet gap this long signals audio has stopped
+const ABSENCE_MS   = Number(process.argv[2] || "9") * 1000;
+if (!Number.isFinite(ABSENCE_MS) || ABSENCE_MS < 3000) throw new Error("absenceSec must be at least 3");
+const STALL_MS     = 1200;   // stall confirmation threshold, not an onset offset
+const POLL_MS      = 200;
 const STAMP        = new Date().toISOString().replace(/[:.]/g, "-");
-const OUT_DIR      = path.join(__dirname, "data");
+const OUT_DIR      = process.env.EXPERIMENT_DATA_DIR || path.join(__dirname, "runs");
 const UID          = Date.now().toString(36).slice(-6);
 const ASSETS_DIR   = path.join(__dirname, "assets");
 const TONE_WAV     = path.join(ASSETS_DIR, "wsn-tone-sweep-48k-180s.wav");
@@ -34,15 +27,7 @@ const FAKE_SENDER = FAKE_MEDIA_ARGS
     .filter((f) => !f.startsWith("--use-file-for-fake-audio-capture"))
     .concat([`--use-file-for-fake-audio-capture=${TONE_WAV}`]);
 
-const rxPkts = (page) => page.evaluate(async () => {
-    let pkts = 0;
-    const pcs = window.wsnVoiceCtl._pcs ? [...window.wsnVoiceCtl._pcs.values()] : [];
-    for (const pc of pcs) {
-        const s = await pc.getStats();
-        s.forEach((r) => { if (r.type === "inbound-rtp" && r.kind === "audio") pkts += r.packetsReceived || 0; });
-    }
-    return pkts;
-});
+const rxPkts = page => page.evaluate(readRxPackets);
 
 (async () => {
     fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -50,19 +35,18 @@ const rxPkts = (page) => page.evaluate(async () => {
     ensureToneWav(TONE_WAV);
 
     const rec = {
+        schemaVersion: 2,
+        method: "aggregate inbound packet-counter polling; not audible silence",
         exportedAt: new Date().toISOString(),
-        absenceMs: ABSENCE_MS,
-        valid: false,
-        audioStopAfterOutMs: -1,
-        reconnectAudioGapMs: -1,
-        totalSilenceMs: -1,
-        invalidReason: null,
+        applicationBuildId: process.env.APP_BUILD_ID || null,
+        absenceMs: ABSENCE_MS, pollIntervalMs: POLL_MS, stallConfirmationMs: STALL_MS,
+        clock: "monotonic Node performance.now(), milliseconds",
+        valid: false, invalidReason: null,
     };
-
-    const senderBrowser   = await chromium.launch({ headless: true, args: FAKE_SENDER });
-    const listenerBrowser = await chromium.launch({ headless: true, args: FAKE_MEDIA_ARGS });
-
+    let senderBrowser, listenerBrowser;
     try {
+        senderBrowser = await chromium.launch({ headless: true, args: FAKE_SENDER });
+        listenerBrowser = await chromium.launch({ headless: true, args: FAKE_MEDIA_ARGS });
         // Sender (A) uses the tone WAV; listener (B) uses the default fake mic.
         const ctxA = await bootContext(senderBrowser, BASE, { stripProcessing: true });
         const ctxB = await bootContext(listenerBrowser, BASE);
@@ -93,56 +77,42 @@ const rxPkts = (page) => page.evaluate(async () => {
         }
         if (!flowing) { rec.invalidReason = "no baseline packet flow after 3 kick attempts"; }
         else {
-            // A moves WEST (avoids scene-rebuild border on the east edge).
-            const tDepart = Date.now();
             const posA = await pA.evaluate(() => window.wsnGame.pos());
-            await pA.evaluate((p) => window.wsnGame.teleport(-25, p.y), posA);
+            const packets = await rxPkts(pB);
+            const tDepart = performance.now();
+            const gap = new PacketGap(tDepart, packets, STALL_MS);
+            rec.observations = gap.samples; // Also retained if a later probe fails.
+            rec.departureCommandMs = tDepart;
+            await pA.evaluate(p => window.wsnGame.teleport(-25, p.y), posA);
             log("A out WEST, watching B's packet stream");
-
-            let tStop = -1, lastPkts = await rxPkts(pB), lastChange = Date.now();
-            const stopLoop = setInterval(async () => {
-                const cur = await rxPkts(pB).catch(() => lastPkts);
-                if (cur > lastPkts) { lastPkts = cur; lastChange = Date.now(); }
-                if (tStop < 0 && Date.now() - lastChange > STALL_MS) {
-                    tStop = lastChange + STALL_MS / 2 - tDepart;
-                    log(`  packet stall detected: stop=${tStop} ms after departure`);
-                }
-            }, 200);
-
-            await sleep(ABSENCE_MS);
-            clearInterval(stopLoop);
-
-            // A returns to original position.
-            const tReturn = Date.now();
-            await pA.evaluate((p) => window.wsnGame.teleport(p.x, p.y), posA);
-            log("A back, watching recovery");
-
-            let tResume = -1; lastPkts = await rxPkts(pB); lastChange = Date.now();
-            for (let t = 0; t < 30000; t += 500) {
-                await sleep(500);
-                const cur = await rxPkts(pB).catch(() => lastPkts);
-                if (cur > lastPkts + 2) {
-                    tResume = Date.now() - tReturn;
-                    log(`  packets resumed: gap=${tResume} ms`);
-                    break;
-                }
-                lastPkts = cur;
+            while (performance.now() < tDepart + ABSENCE_MS) {
+                await sleep(Math.min(POLL_MS, Math.max(0, tDepart + ABSENCE_MS - performance.now())));
+                const count = await rxPkts(pB);
+                gap.observe(performance.now(), count);
             }
+            const tReturn = performance.now();
+            rec.returnCommandMs = tReturn;
+            await pA.evaluate(p => window.wsnGame.teleport(p.x, p.y), posA);
+            log("A back, watching packet recovery");
+            while (performance.now() < tReturn + 30000) {
+                const count = await rxPkts(pB);
+                gap.observe(performance.now(), count);
+                if (gap.resumeMs != null) break;
+                await sleep(POLL_MS);
+            }
+            Object.assign(rec, gap.summary(tDepart, tReturn));
 
-            rec.audioStopAfterOutMs  = tStop;
-            rec.reconnectAudioGapMs  = tResume;
-            rec.totalSilenceMs       = tStop >= 0 && tResume >= 0 ? tStop + tResume : -1;
-            // Valid if both events were captured and the stop closely tracked departure.
-            rec.valid = tStop > 0 && tResume > 0 && tStop < ABSENCE_MS + 3000;
-            if (!rec.valid) rec.invalidReason = `tStop=${tStop} tResume=${tResume}`;
         }
 
-        const file = path.join(OUT_DIR, `wsn-audiogap-${STAMP}.json`);
-        fs.writeFileSync(file, JSON.stringify(rec, null, 1));
-        log(`wrote ${path.basename(file)}`);
-        log(`valid=${rec.valid}  stop=${rec.audioStopAfterOutMs} ms  gap=${rec.reconnectAudioGapMs} ms`);
+    } catch (error) {
+        rec.valid = false;
+        rec.invalidReason = String(error);
+        process.exitCode = 1;
     } finally {
-        await senderBrowser.close();
-        await listenerBrowser.close();
+        const file = path.join(OUT_DIR, `wsn-packetgap-v2-${STAMP}.json`);
+        fs.writeFileSync(file, JSON.stringify(rec, null, 2) + "\n");
+        log(`wrote ${path.basename(file)}; valid=${rec.valid}`);
+        if (!rec.valid) { log(rec.invalidReason); process.exitCode = 1; }
+        await Promise.allSettled([senderBrowser?.close(), listenerBrowser?.close()]);
     }
 })();
