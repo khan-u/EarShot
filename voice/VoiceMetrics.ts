@@ -9,7 +9,8 @@
  * validated, direction- and time-matched measurements.
  *
  * It imports nothing from the mesh — it is fed by an injected peer provider and
- * pushed lifecycle edges, and is duty-cycled with the radio. Instrumentation
+ * pushed lifecycle edges. The host starts its two-second sampler at controller
+ * initialization and stops it on disconnect. Instrumentation
  * overhead has not been independently quantified. Data leaves via exportJson() or the `wsnVoice`
  * DevTools handle. The KPI arithmetic lives in ./metrics so it can be tested
  * without a browser.
@@ -36,7 +37,7 @@ export class VoiceMetrics {
         VoiceMetrics.peersProvider = provider;
     }
 
-    // ── duty cycle (driven by VoiceRTC alongside the radio) ───────────────────
+    // ── sampling lifecycle (managed by the host) ───────────────────
 
     static start(): void {
         if (VoiceMetrics.timer != null || typeof window === "undefined") { return; }

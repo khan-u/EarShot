@@ -10,6 +10,8 @@ function createExperimentServer({ directory = path.join(__dirname, "..", "client
     iceServers = [{ urls: "stun:stun.l.google.com:19302" }], tls = null } = {}) {
     const manifestBytes = fs.readFileSync(path.join(directory, "build.json"));
     const manifest = JSON.parse(manifestBytes);
+    const serverHash = createHash("sha256").update(fs.readFileSync(__filename)).digest("hex");
+    if (manifest.inputHashes?.["client/server.cjs"] !== serverHash) throw new Error("server source differs from the client build; rebuild before starting");
     const content = new Map([["build.json", manifestBytes]]);
     for (const [name, expected] of Object.entries(manifest.assets)) {
         const bytes = fs.readFileSync(path.join(directory, name));
@@ -23,7 +25,9 @@ function createExperimentServer({ directory = path.join(__dirname, "..", "client
     const handler = (req, res) => {
         res.setHeader("Cache-Control", "no-store"); res.setHeader("X-Content-Type-Options", "nosniff");
         if (req.method !== "GET") { res.writeHead(405).end(); return; }
-        const pathname = new URL(req.url, "http://localhost").pathname;
+        let pathname;
+        try { pathname = new URL(req.url, "http://localhost").pathname; }
+        catch { res.writeHead(400).end(); return; }
         if (pathname === "/api/turn") { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ iceServers })); return; }
         const asset = assets.get(pathname);
         if (!asset) { res.writeHead(404).end(); return; }

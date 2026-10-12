@@ -25,7 +25,8 @@ function render(): void {
     const list = document.getElementById("participants")!; list.replaceChildren();
     for (const peer of roster) { const li = document.createElement("li"); li.textContent = `${peer.name}: (${peer.x}, ${peer.y})${peer.id === self?.id ? " — this device" : ""}`; list.appendChild(li); }
     for (const id of ["voice", "play", "leave", "out", "back"]) button(id).disabled = !self;
-    button("join-button").disabled = !!self || joining;
+    button("join-button").disabled = !!socket || joining;
+    input("name").disabled = !!self || joining; input("room").disabled = !!self || joining;
 }
 function disconnected(): void {
     rtc?.setEnabled(false); rtc?.setMuted(true); VoiceMetrics.stop();
@@ -37,6 +38,7 @@ async function join(name: string): Promise<void> {
     if (joining || socket) throw new Error("reload before starting another connection");
     if (!window.isSecureContext) throw new Error("Microphone access requires HTTPS or localhost.");
     if (!VoiceRTC.supported()) throw new Error("WebRTC microphone capture is unavailable.");
+    input("name").value = name;
     joining = true; render();
     const url = new URL("/signal", location.href); url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
     socket = new WebSocket(url);

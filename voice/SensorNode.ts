@@ -1,15 +1,14 @@
 /**
  * SensorNode — the WSN sensing layer for the proximity voice mesh.
  *
- * VoiceRTC models the game world as a MANET; this module makes each client a
- * sensor node on top of it. Three modalities: acoustic (VAD speech edges pushed
- * from VoiceRTC), position (tile coordinates, provider wired by Game), and link
- * quality (per-peer RTT / jitter / loss / uplink from getStats — the RSSI
- * stand-in). Reporting follows the DTX principle at the telemetry layer: a 2 s
+ * The proximity overlay emulates neighbour relationships; it is not physical
+ * MANET routing. This experiment host samples position (integer tile coordinates)
+ * and link quality. Acoustic VAD hooks remain for historical analysis, but the
+ * minimal controller does not run the game conversation VAD. Link readings are
+ * RTT, jitter, loss and uplink rate from getStats, not physical RSSI. A 2 s
  * sampler turns a sample into a report only on a significant event or a slow
  * heartbeat, and every suppressed sample is counted, so the suppression ratio is
- * itself a measured outcome. Like the radio, the sampler is duty-cycled — it runs
- * only while the mesh is up. The pure event/energy logic lives in ./sensing.
+ * itself a measured outcome. The sampler runs while proximity voice is enabled. The pure event/energy logic lives in ./sensing.
  */
 import {
     PeerEntry, NodePosition, LinkReading, SenseReport,

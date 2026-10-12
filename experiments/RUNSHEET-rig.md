@@ -46,9 +46,9 @@ node experiments/rig-driver.cjs --runs 5 --bursts 60 --amp 0.4
 | `--secs S` | Requested recorder duration; default `bursts * 2 + 6` |
 | `--peer-wait S` | Maximum initial peer wait; default 600 s |
 | `--audio-index N` | Override the AVFoundation index resolved from the device name |
-| `--dry` | Exercise login and the live peer gate without switching audio or capturing |
+| `--dry` | Check room login, peer flow and forward receiver telemetry without switching audio or capturing |
 
-`--dry` still needs the running host and a responding phone peer. It can wait up to the configured peer timeout. Interactive access gates may require the operator to clear the page and press Enter. Audio input/output selection is normally restored after the session; inspect routing after an abnormal exit.
+`--dry` still needs the running host and an opted-in phone with advancing receiver counters. It can wait up to the configured peer timeout. The minimal host joins automatically. An external access gate may require the operator to clear the page and press Enter. Startup requires successful audio-route selection; browser or interface startup failures restore the saved routes. Audio input/output selection is restored after the session unless `--no-restore` was requested; inspect routing after an abnormal exit.
 
 The nominal stimulus is a 2 kHz, 5 ms Hann-windowed burst every 2 s. The driver starts playback, then requests a 48 kHz stereo recording, so early stimulus events may precede acquisition. Neither the requested rate nor duration verifies continuity or physical elapsed time. This startup sequence and the recording time base need checking with the actual interface before collecting submission data.
 

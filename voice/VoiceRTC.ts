@@ -50,6 +50,7 @@ export class VoiceRTC {
     private nonce: number;               // our perfect-negotiation tie-break
     private peers: Map<number, Peer> = new Map();
     private enabled = false;             // proximity voice is off until turned on
+    private generation = 0;              // invalidates asynchronous peer creation on shutdown
 
     // Teardown grace window W (ms): on range-exit, hold the peer warm for W and
     // resume on return with no ICE rebuild; W=0 is the on-demand default. Set via
@@ -153,18 +154,24 @@ export class VoiceRTC {
         if (VoiceRTC.iceFetched) { return Promise.resolve(); }
         if (VoiceRTC.iceFetching) { return VoiceRTC.iceFetching; }
         VoiceRTC.iceFetching = (async () => {
+            const forceRelay = !!(window as any).wsnForceRelay || readParam("wsnforcerelay") === "1";
+            const abort = new AbortController();
+            const timer = setTimeout(() => abort.abort(), 3000);
             try {
-                const res = await fetch("/api/turn", { cache: "no-store" });
+                const res = await fetch("/api/turn", { cache: "no-store", signal: abort.signal });
+                if (!res.ok) throw new Error("ICE configuration unavailable");
                 const j = await res.json();
-                if (j && Array.isArray(j.iceServers) && j.iceServers.length > 0) {
-                    // Forced-relay routes every link through TURN even when a direct
-                    // path exists, to isolate the relay hop's cost.
-                    let forceRelay = !!(window as any).wsnForceRelay;
-                    if (readParam("wsnforcerelay") === "1") { forceRelay = true; }
-                    VoiceRTC.ICE = { iceServers: j.iceServers, iceTransportPolicy: forceRelay ? "relay" : "all" };
+                if (j && Array.isArray(j.iceServers)) {
+                    VoiceRTC.ICE = { iceServers: j.iceServers };
                 }
             } catch { /* keep STUN fallback */ }
-            finally { VoiceRTC.iceFetched = true; VoiceRTC.iceFetching = null; }
+            finally {
+                clearTimeout(timer);
+                // A requested relay experiment must fail to connect if TURN is
+                // unavailable, rather than silently measure a direct path.
+                VoiceRTC.ICE.iceTransportPolicy = forceRelay ? "relay" : "all";
+                VoiceRTC.iceFetched = true; VoiceRTC.iceFetching = null;
+            }
         })();
         return VoiceRTC.iceFetching;
     }
@@ -210,17 +217,21 @@ export class VoiceRTC {
         if (existing) { return Promise.resolve(existing); }
         const inflight = this.ensuring.get(index);
         if (inflight) { return inflight; }
-        const p = this.createPeer(index).finally(() => this.ensuring.delete(index));
+        const p = this.createPeer(index).finally(() => {
+            if (this.ensuring.get(index) === p) this.ensuring.delete(index);
+        });
         this.ensuring.set(index, p);
         return p;
     }
 
     private async createPeer(index: number): Promise<Peer | null> {
+        const generation = this.generation;
         const existing = this.peers.get(index);
         if (existing) { return existing; }
         const stream = await this.getLocalStream();
         if (!stream) { return null; }
         await VoiceRTC.ensureIce();   // live TURN creds (STUN fallback if unavailable)
+        if (!this.enabled || generation !== this.generation) return null;
 
         const pc = new RTCPeerConnection(VoiceRTC.ICE);
         const peer: Peer = {
@@ -233,14 +244,16 @@ export class VoiceRTC {
         for (const track of stream.getAudioTracks()) { pc.addTrack(track, stream); }
 
         pc.onicecandidate = (ev) => {
-            if (ev.candidate) { this.sendSignal(index, JSON.stringify({ k: "ice", cand: ev.candidate.toJSON() })); }
+            if (this.peers.get(index) === peer && ev.candidate) { this.sendSignal(index, JSON.stringify({ k: "ice", cand: ev.candidate.toJSON() })); }
         };
         pc.ontrack = (ev) => {
+            if (this.peers.get(index) !== peer) return;
             this.dbg("remote track from", index);
             this.attachRemoteAudio(peer, ev.streams[0] || new MediaStream([ev.track]));
         };
         pc.onnegotiationneeded = async () => { try { await this.makeOffer(peer); } catch (e) { this.dbg("negneeded err", e); } };
         pc.onconnectionstatechange = () => {
+            if (this.peers.get(index) !== peer) return;
             const st = pc.connectionState;
             this.dbg("peer", index, "state:", st);
             VoiceMetrics.markState(index, st);      // setup-time / ICE-success record
@@ -252,6 +265,7 @@ export class VoiceRTC {
     }
 
     private async makeOffer(peer: Peer): Promise<void> {
+        if (!this.enabled || this.peers.get(peer.index) !== peer) return;
         try {
             peer.makingOffer = true;
             if (this.dtxOn) {
@@ -261,7 +275,8 @@ export class VoiceRTC {
             } else {
                 await peer.pc.setLocalDescription();   // implicit createOffer
             }
-            this.sendSignal(peer.index, JSON.stringify({ k: "offer", sdp: peer.pc.localDescription, nonce: this.nonce }));
+            if (this.enabled && this.peers.get(peer.index) === peer)
+                this.sendSignal(peer.index, JSON.stringify({ k: "offer", sdp: peer.pc.localDescription, nonce: this.nonce }));
             this.dbg("→ offer to", peer.index);
         } catch (e) {
             this.dbg("makeOffer failed", e);
@@ -355,9 +370,9 @@ export class VoiceRTC {
             for (const s of peer.pc.getSenders()) {
                 if (on) {
                     const t = this.localStream ? this.localStream.getAudioTracks()[0] : null;
-                    if (t) { void s.replaceTrack(t); }
+                    if (t) { void s.replaceTrack(t).catch(e => this.dbg("resume track failed", e)); }
                 } else if (s.track) {
-                    void s.replaceTrack(null);
+                    void s.replaceTrack(null).catch(e => this.dbg("pause track failed", e));
                 }
             }
         } catch { /* pc closing */ }
@@ -396,7 +411,8 @@ export class VoiceRTC {
                     } else {
                         await peer.pc.setLocalDescription();   // implicit createAnswer
                     }
-                    this.sendSignal(fromIndex, JSON.stringify({ k: "answer", sdp: peer.pc.localDescription, nonce: this.nonce }));
+                    if (this.enabled && this.peers.get(fromIndex) === peer)
+                        this.sendSignal(fromIndex, JSON.stringify({ k: "answer", sdp: peer.pc.localDescription, nonce: this.nonce }));
                     this.dbg("→ answer to", fromIndex);
                 } else {
                     await peer.pc.setRemoteDescription(msg.sdp);
@@ -476,6 +492,8 @@ export class VoiceRTC {
     peerCount(): number { return this.peers.size; }
 
     shutdown(): void {
+        this.generation++;
+        this.ensuring.clear();
         SensorNode.stop();   // node sleeps with the radio (flushes a final report)
         for (const idx of [...this.peers.keys()]) { this.closePeer(idx, true); }
     }
@@ -484,10 +502,13 @@ export class VoiceRTC {
     private closePeer(index: number, sendBye: boolean): void {
         const peer = this.peers.get(index);
         if (!peer) { return; }
-        if (sendBye) { try { this.sendSignal(index, JSON.stringify({ k: "bye" })); } catch { /* closing */ } }
-        try { peer.pc.ontrack = null; peer.pc.onicecandidate = null; peer.pc.close(); } catch { /* already closed */ }
-        if (peer.audioEl) { try { peer.audioEl.srcObject = null; peer.audioEl.remove(); } catch { /* detached */ } }
         this.peers.delete(index);
+        if (sendBye) { try { this.sendSignal(index, JSON.stringify({ k: "bye" })); } catch { /* closing */ } }
+        peer.pc.ontrack = null; peer.pc.onicecandidate = null;
+        peer.pc.onconnectionstatechange = null; peer.pc.onnegotiationneeded = null;
+        try { peer.pc.close(); } catch { /* already closed */ }
+        VoiceMetrics.markState(index, "closed");
+        if (peer.audioEl) { try { peer.audioEl.srcObject = null; peer.audioEl.remove(); } catch { /* detached */ } }
     }
 
     /** Guided-experiment entry: form the proximity mesh + gesture-prime the mic. */

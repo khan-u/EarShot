@@ -22,7 +22,7 @@ HOST=0.0.0.0 TLS_CERT=client-secrets/cert.pem TLS_KEY=client-secrets/key.pem npm
 
 Use the certificate's hostname on both devices. This is a small experiment server for controlled participants; rooms are not authenticated accounts. It defaults to loopback and holds at most 16 participants per room.
 
-The default ICE configuration supplies a STUN server. If the devices require TURN, set `ICE_SERVERS_JSON` to an array of valid browser `RTCIceServer` configurations before starting the server. Credentials are supplied at runtime, not committed. `/api/turn` serves that configuration to the clients. `?wsnforcerelay=1` requests relay-only media; it needs an actual working TURN configuration. Confirm the selected candidate pair in the receiver telemetry before labelling a run as direct or relayed.
+The default ICE configuration supplies a STUN server. If the devices require TURN, set `ICE_SERVERS_JSON` to an array of valid browser `RTCIceServer` configurations before starting the server. Credentials are supplied at runtime, not committed. `/api/turn` serves that configuration to the clients. `?wsnforcerelay=1` requests relay-only media; it needs an actual working TURN configuration. A failed configuration fetch cannot silently switch a relay-only run to a direct path. Confirm the selected candidate pair in the receiver telemetry before labelling a run as direct or relayed.
 
 ## Run experiments
 
@@ -36,7 +36,7 @@ node experiments/rig-driver.cjs --dry --peer-wait 60
 node experiments/rig-driver.cjs --runs 5 --bursts 60 --amp 0.4
 ```
 
-The dry run still requires a connected phone and starts the real browser microphone; it does not play the stimulus or record the interface. Full captures also need the physical wiring and macOS audio tools listed in the runsheet. `TS_CLIENT` is optional: the harnesses now use this repository's Playwright dependency by default. It remains an override for an existing external client installation; it does not restore the removed game APIs. Harnesses explicitly select installed standard Chrome, not Chrome for Testing.
+The dry run requires an opted-in phone, verifies identified forward receiver progress and starts the real browser microphone; it does not play the stimulus or record the interface. Full captures also need the physical wiring and macOS audio tools listed in the runsheet. `TS_CLIENT` is optional: the harnesses now use this repository's Playwright dependency by default. It remains an override for an existing external client installation; it does not restore the removed game APIs. Harnesses explicitly select installed standard Chrome, not Chrome for Testing.
 
 Formation, DTX, packet-gap and grace harnesses can join this client through the existing `loginPage` adapter. `wsnGame.teleport(dx, dy)` retains relative integer tile movement. `wsnVoiceCtl` exposes the revised identified stream probes and receiver request/reply API. Sensing retains position and link sampling; the game conversation commands `speakTo` and `speakAccept` are absent, and the conversation scenario refuses this host. Game-scene failure reproduction, game rendering load, acoustic VAD/conversation sensing, cluster/election experiments and the separate SFU baseline are outside this minimal host.
 
@@ -44,7 +44,7 @@ Peers within a Euclidean distance of 15 tiles are neighbours; the local particip
 
 ## Build and capture identity
 
-`build:client` creates the ignored `client-dist/` directory. `build.json` records the Git commit, dirty status, compiler/runtime versions, relative input filenames and SHA-256 hashes, plus checksums of the served assets. The content-derived build ID is embedded in the browser bundle. Build after committing for a clean, reproducible source reference. Restart the server after rebuilding: the server verifies the files once and holds that complete build in memory for its lifetime.
+`build:client` creates the ignored `client-dist/` directory. `build.json` records the Git commit, dirty status, compiler/runtime versions, relative input filenames and SHA-256 hashes, plus checksums of the served assets. The content-derived build ID is embedded in the browser bundle. Build after committing for a clean, reproducible source reference. Startup also checks that the server source matches its hash in the manifest. Restart the server after rebuilding: the server verifies the files once and holds that complete build in memory for its lifetime.
 
 The server rejects joins from a different build ID. The audio snapshots on both endpoints carry the loaded build ID, and receiver preflight rejects unequal or partially identified builds. The rig saves those reported IDs in `manifest.json` and copies the served manifest to `client-build.json`. Retain that file with the raw capture and telemetry. This is recorded build provenance, not remote attestation. Legacy hosts without build IDs remain explicitly unidentified; optional operator-provided identifiers are recorded separately.
 
@@ -68,4 +68,4 @@ npm run build:client
 npm run test:client
 ```
 
-The client tests cover the proximity boundary, relative movement, served build integrity, room membership, source identity, large measurement messages and rejection of stale builds. The remaining suite covers the controller's pure helpers and capture telemetry. A two-device microphone/playout smoke test and physical rig validation remain required before collecting study data.
+See [the review record](REVIEW.md) for the corrections and remaining validation. The client tests cover the proximity boundary, relative movement, served build integrity, room membership, source identity, large measurement messages and rejection of stale builds. The remaining suite covers the controller's pure helpers, lifecycle races with stubbed media APIs, capture telemetry and audio-route restoration after startup failures. A two-device microphone/playout smoke test and physical rig validation remain required before collecting study data.

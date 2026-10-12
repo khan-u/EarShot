@@ -11,7 +11,7 @@
  *   default OUTPUT = "USB Audio CODEC" (UCA202)  -> afplay stimulus -> splitter ->
  *                                                   earbud @ built-in mic + ref -> IN L
  *   default INPUT  = "MacBook Pro Microphone"    -> Device A getUserMedia
- *   ffmpeg records the UCA202 explicitly by avfoundation index (default 1).
+ *   ffmpeg records the UCA202 explicitly by its resolved AVFoundation index (or an explicit override).
  *
  * Serve the minimal client in this repository, or supply an external game host
  * with the revised controller. This driver saves raw results
@@ -22,7 +22,7 @@
  * Usage:
  *   node experiments/rig-driver.cjs --dry
  *       # validate: launch A, login, enable voice, reach the peer-wait gate. No
- *       # audio switching, no capture. Safe to run without the phone/wiring.
+ *       # audio switching or capture. Requires a phone with receiver telemetry.
  *   node rig-driver.cjs [--secs N] [--bursts N] [--amp 0.7] [--audio-index 1] [--no-restore]
  *       # full run: waits for the phone peer, then captures + analyzes.
  */
@@ -71,9 +71,8 @@ const UID = Date.now().toString(36).slice(-6);
 // ISO run stamp for archived artifacts (rig-rec-<STAMP>.wav); sortable and
 // unique per run.
 const runStamp = () => new Date().toISOString().replace(/[:.]/g, "-");
-// Fixed account, reused across runs; the first run creates it and the server
-// kicks a lingering previous session on re-login. Override with RIG_USER /
-// RIG_PASS.
+// The minimal host uses USER as a participant label. Legacy game hosts also
+// use PASS for account login. Override through RIG_USER / RIG_PASS.
 const USER = process.env.RIG_USER || "Macbook";
 const PASS = process.env.RIG_PASS || "rigpass-macbook";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -331,44 +330,47 @@ async function capture(page, runIdx) {
 // ── main ──────────────────────────────────────────────────────────────────────
 (async () => {
     log(`Device-A driver | BASE=${BASE}`);
-    log(DRY ? "MODE: dry (validate login + peer gate; no audio switch, no capture)" : `MODE: full run (bursts=${BURSTS}, amplitude=${AMPLITUDE}, capture=${SECS}s)`);
+    log(DRY ? "MODE: dry (login, peer flow and receiver telemetry; no audio switch or capture)" : `MODE: full run (bursts=${BURSTS}, amplitude=${AMPLITUDE}, capture=${SECS}s)`);
 
-    let prevOut = null, prevIn = null;
-    if (!DRY) {
-        prevOut = getDev("output"); prevIn = getDev("input");
-        setDev("output", OUT_DEV); setDev("input", IN_DEV);
-        // Capture-device sanity: resolve the UCA202's CURRENT avfoundation index.
-        audioIndex = AUDIO_INDEX != null ? AUDIO_INDEX : resolveAudioIndex(OUT_DEV);
-        if (audioIndex == null) {
-            log(`ERR cannot find "${OUT_DEV}" in ffmpeg's avfoundation device list — is the UCA202 plugged in?`);
-            process.exit(1);
-        }
-        log(`capture device: [${audioIndex}] ${OUT_DEV}${AUDIO_INDEX != null ? " (explicit --audio-index)" : " (resolved by name)"}`);
-    }
-
-    // Persistent profile: Cache Storage (the large game-cache download) and
-    // session cookies survive across runs, so the login-screen cache gate is
-    // paid once, not per run — and never during the capture window.
-    const PROFILE_DIR = path.join(__dirname, ".rig-profile");
-    const ctx = await chromium.launchPersistentContext(PROFILE_DIR, {
-        channel: "chrome",
-        headless: false,
-        viewport: { width: 390, height: 844 },
-        args: ["--autoplay-policy=no-user-gesture-required", "--use-angle=metal", "--enable-gpu"],
-    });
+    let prevOut = null, prevIn = null, ctx = null, cleaned = false;
     const cleanup = async () => {
-        try { await ctx.close(); } catch (_) {}
+        if (cleaned) return;
+        cleaned = true;
+        try { await ctx?.close(); } catch (_) {}
         if (!DRY && !NO_RESTORE) { if (prevOut) setDev("output", prevOut); if (prevIn) setDev("input", prevIn); }
     };
-    process.on("SIGINT", async () => { log("interrupted"); await cleanup(); process.exit(130); });
+    process.once("SIGINT", async () => { log("interrupted"); await cleanup(); process.exit(130); });
 
     try {
+        if (!DRY) {
+            prevOut = getDev("output"); prevIn = getDev("input");
+            if (!prevOut || !prevIn) throw new Error("cannot read initial audio routing; no devices changed");
+            if (!setDev("output", OUT_DEV) || !setDev("input", IN_DEV)) throw new Error("audio routing failed");
+            // Capture-device sanity: resolve the UCA202's CURRENT avfoundation index.
+            audioIndex = AUDIO_INDEX != null ? AUDIO_INDEX : resolveAudioIndex(OUT_DEV);
+            if (audioIndex == null) {
+                log(`ERR cannot find "${OUT_DEV}" in ffmpeg's avfoundation device list — is the UCA202 plugged in?`);
+                throw new Error("capture interface unavailable");
+            }
+            log(`capture device: [${audioIndex}] ${OUT_DEV}${AUDIO_INDEX != null ? " (explicit --audio-index)" : " (resolved by name)"}`);
+        }
+
+        // A dedicated experiment profile retains permissions between runs.
+        // Legacy external hosts may also retain their cache and login session.
+        const PROFILE_DIR = path.join(__dirname, ".rig-profile");
+        ctx = await chromium.launchPersistentContext(PROFILE_DIR, {
+            channel: "chrome",
+            headless: false,
+            viewport: { width: 390, height: 844 },
+            args: ["--autoplay-policy=no-user-gesture-required", "--use-angle=metal", "--enable-gpu"],
+        });
         try { await ctx.grantPermissions(["microphone"], { origin: BASE }); } catch (_) {}
         await ctx.addInitScript(initScript);
         const page = ctx.pages()[0] || await ctx.newPage();
         const url = BASE + (BASE.includes("?") ? "&" : "?") + "wsnskipvoice=1";
         await page.goto(url, { waitUntil: "domcontentloaded" });
-        if (MANUAL_LOGIN) {
+        const minimalClient = await page.evaluate(() => !!window.proxExperiment);
+        if (MANUAL_LOGIN && (!minimalClient || flag("--manual-login"))) {
             await waitForEnter(
                 "  Manual step: clear any access gate in front of " + BASE + "\n" +
                 "  In the headful browser window, sign through any access gate until\n" +
@@ -388,9 +390,9 @@ async function capture(page, runIdx) {
         log("voice enabled on Device A");
 
         console.log("\n" + "=".repeat(72));
-        console.log("  On the phone (device B): log into " + BASE.replace("127.0.0.1", "<this-mac-LAN-IP>"));
+        console.log("  On the phone (device B): open " + BASE.replace("127.0.0.1", "<this-mac-LAN-IP>"));
         console.log("      append ?wsnmeasure=1 (or &wsnmeasure=1) to opt into receiver telemetry;");
-        console.log("      spawn near Device A (shared home tile is in range), enable voice,");
+        console.log("      join the same room at the initial tile (or spawn near A), enable voice,");
         console.log("      and make sure its headphone-out is wired to the UCA202 RIGHT input.");
         console.log("=".repeat(72) + "\n");
 
@@ -440,7 +442,16 @@ async function capture(page, runIdx) {
         const s = await snap(page);
         if (!(s.peers >= 1 && s.pkts > 50)) { log("no peer / no RTP within the wait window — is the phone logged in and in range?"); await cleanup(); process.exit(1); }
 
-        if (DRY) { log("DRY RUN OK — automation reached a live peer link. Stopping before capture."); await cleanup(); process.exit(0); }
+        if (DRY) {
+            const captureId = "dry-" + runStamp();
+            const first = await sampleReceiver(page, captureId);
+            await sleep(500);
+            const second = await sampleReceiver(page, captureId);
+            const checked = receiverInterval(first, second);
+            if (!checked.valid) throw new Error("dry-run receiver preflight failed: " + (first.error || second.error || checked.invalidReason));
+            log("DRY RUN OK — identified forward receiver counters advanced. Stopping before capture.");
+            await cleanup(); process.exit(0);
+        }
 
         const results = [];
         for (let runIdx = 1; runIdx <= RUNS; runIdx++) {

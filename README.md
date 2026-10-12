@@ -132,8 +132,7 @@ Full game experiments still require the external application and the fuller cont
 | `wsnVoiceCtl.rxAudio()` | Legacy aggregate diagnostic; new experiments use identified stats |
 | `wsnVoiceCtl.peers()`, `peerIndices()`, `linkDebug()` | Peer and connection diagnostics |
 | `wsnVoiceCtl.setGrace(ms)`, `grace()` | Apply and verify the grace window on both endpoints |
-| `wsnSense.stats()`, `links`, `kindCounts?.()` | Sensing diagnostics supplied by the host |
-| `wsnEnergy.total()` | Virtual energy debit supplied by the host |
+| `wsnSense.stats()`, `dump()`, `energy()` | Position/link sensing and measured or modelled energy level |
 
 `wsnVoice.setCalibrationMs(C)` remains a manual additive-offset API; calling it sets a software flag, not a scientific validation status. The revised capture driver does not call it or shift acoustic results to match software.
 
