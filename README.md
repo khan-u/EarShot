@@ -210,28 +210,102 @@ Numerical reproduction is available. Physical timing accuracy and generalized en
 
 ### Capture files and receiver telemetry
 
-- **Capture files:** each run saves the stimulus, WAV, raw CSV, logs and manifest under `experiments/runs/` (override with `RIG_DATA_DIR`), plus `receiver-telemetry.jsonl` and `receiver-summary.json`. The sender KPI is a separately labelled diagnostic.
-- **Build identity:** the manifest records the repository commit and dirty status. Optional `APP_BUILD_ID` (sender) and `RECEIVER_APP_BUILD_ID` (phone) values are operator assertions. The minimal client also reports embedded build IDs from both endpoints and archives the matching served manifest as `client-build.json`; unequal or partially identified endpoint builds fail preflight.
-- **Receiver setup:** both endpoints need the revised controller. The phone must opt in with `?wsnmeasure=1` (or `&wsnmeasure=1`). The signalling relay must forward `measure-request` and `measure-response` JSON messages without truncation. The included room server supports this; an external game host needs equivalent support.
-- **Preflight:** before stimulus playback, the driver checks request/reply operation, exactly one connected peer, matching sender-outbound/receiver-inbound SSRC, and advancing received/emitted counters. Missing support stops the run.
-- **Samples:** a bounded, serial request loop collects receiver samples around each recorder command window. Samples retain browser-session, connection, report and SSRC identities, raw counters, request/reply timestamps, visibility and selected-pair joins.
-- **Clock mapping:** four timestamps bound the receiver-to-host clock offset without assuming symmetric signalling delays. Browser stats timestamps are mapped with those bounds. Intervals straddling the recorder command-window boundaries are excluded; retained interval durations and clock bounds remain in the summary.
-- **Estimator:** interval jitter-buffer residence uses counter differences only. Missing intervals, identity changes and long sampling gaps invalidate the telemetry summary. The interval model median keeps the assumed 40 ms term explicit and does not adjust the acoustic measurement. RTT/2 assumes path symmetry; jitter-buffer residence is an interval average, not a burst-level delay.
-- **Timing limits:** matching a capture ID and recorder command window does not establish the WAV sample clock's physical origin or continuity. Validate clock mapping, capture startup, telemetry overhead and a matched burst/window analysis on the physical setup before claiming agreement. `valid` means the telemetry's software collection checks passed.
+- **Capture files**
+
+  - Each run saves the stimulus, WAV, raw CSV, logs and manifest under `experiments/runs/` (override with `RIG_DATA_DIR`), plus `receiver-telemetry.jsonl` and `receiver-summary.json`.
+  - The sender KPI is a separately labelled diagnostic.
+
+- **Build identity**
+
+  - The manifest records the repository commit and dirty status.
+  - Optional `APP_BUILD_ID` (sender) and `RECEIVER_APP_BUILD_ID` (phone) values are operator assertions.
+  - The minimal client also reports embedded build IDs from both endpoints and archives the matching served manifest as `client-build.json`; unequal or partially identified endpoint builds fail preflight.
+
+- **Receiver setup**
+
+  - Both endpoints need the revised controller.
+  - The phone must opt in with `?wsnmeasure=1` (or `&wsnmeasure=1`).
+  - The signalling relay must forward `measure-request` and `measure-response` JSON messages without truncation.
+  - The included room server supports this; an external game host needs equivalent support.
+
+- **Preflight**
+
+  - Before stimulus playback, the driver checks request/reply operation, exactly one connected peer, matching sender-outbound/receiver-inbound SSRC, and advancing received/emitted counters.
+  - Missing support stops the run.
+
+- **Samples**
+
+  - A bounded, serial request loop collects receiver samples around each recorder command window.
+  - Samples retain browser-session, connection, report and SSRC identities, raw counters, request/reply timestamps, visibility and selected-pair joins.
+
+- **Clock mapping**
+
+  - Four timestamps bound the receiver-to-host clock offset without assuming symmetric signalling delays.
+  - Browser stats timestamps are mapped with those bounds.
+  - Intervals straddling the recorder command-window boundaries are excluded; retained interval durations and clock bounds remain in the summary.
+
+- **Estimator**
+
+  - Interval jitter-buffer residence uses counter differences only.
+  - Missing intervals, identity changes and long sampling gaps invalidate the telemetry summary.
+  - The interval model median keeps the assumed 40 ms term explicit and does not adjust the acoustic measurement.
+  - RTT/2 assumes path symmetry; jitter-buffer residence is an interval average, not a burst-level delay.
+
+- **Timing limits**
+
+  - Matching a capture ID and recorder command window does not establish the WAV sample clock's physical origin or continuity.
+  - Validate clock mapping, capture startup, telemetry overhead and a matched burst/window analysis on the physical setup before claiming agreement.
+  - `valid` means the telemetry's software collection checks passed.
 
 ### Packet-gap and grace measurements
 
-- **Polling and movement:** the harnesses use `audioStats()`, monotonic host timestamps and serial nominal 200 ms polling. Grace is applied and checked at both endpoints. Movement uses relative tile deltas and verifies the outward and return positions.
-- **Stop and recovery:** packet increments count only across observations of the same browser session, peer connection and RTP stream. A new or reset counter must advance on a subsequent poll; its lifetime count alone is not recovery evidence. The 1200 ms threshold confirms a stop and is not added to its onset estimate. Total packet interruption includes the absence interval.
-- **Output:** new formation, DTX and gap records use `schemaVersion: 3` and `identified` filenames under `experiments/runs/` (override with `EXPERIMENT_DATA_DIR`). They retain raw stats and invalid reasons. Historical aggregation remains separate.
-- **Bandwidth:** rates use per-stream byte and timestamp differences and become unavailable after stream changes, counter resets or missing reports. A grace absence rate spans the baseline and final absence snapshots, with their command/probe uncertainty; a closed connection makes that whole-window rate unavailable.
-- **Interpretation:** these polling proxies depend on browser stats refresh and command timing; they do not establish audible silence. Peer retention means presence at every sampled poll, not proof of uninterrupted connectivity.
+- **Polling and movement**
+
+  - The harnesses use `audioStats()`, monotonic host timestamps and serial nominal 200 ms polling.
+  - Grace is applied and checked at both endpoints.
+  - Movement uses relative tile deltas and verifies the outward and return positions.
+
+- **Stop and recovery**
+
+  - Packet increments count only across observations of the same browser session, peer connection and RTP stream.
+  - A new or reset counter must advance on a subsequent poll; its lifetime count alone is not recovery evidence.
+  - The 1200 ms threshold confirms a stop and is not added to its onset estimate.
+  - Total packet interruption includes the absence interval.
+
+- **Output**
+
+  - New formation, DTX and gap records use `schemaVersion: 3` and `identified` filenames under `experiments/runs/` (override with `EXPERIMENT_DATA_DIR`).
+  - They retain raw stats and invalid reasons.
+  - Historical aggregation remains separate.
+
+- **Bandwidth**
+
+  - Rates use per-stream byte and timestamp differences and become unavailable after stream changes, counter resets or missing reports.
+  - A grace absence rate spans the baseline and final absence snapshots, with their command/probe uncertainty; a closed connection makes that whole-window rate unavailable.
+
+- **Interpretation**
+
+  - These polling proxies depend on browser stats refresh and command timing; they do not establish audible silence.
+  - Peer retention means presence at every sampled poll, not proof of uninterrupted connectivity.
 
 ### Supported host and interfaces
 
-- **Minimal client:** omits game UI and conversation APIs. Its bundle does not load `HomeScreen.ts`, `VoiceChat.ts` or the conversation VAD helper. `DebugFlags.ts` supplies the logging toggle.
-- **Full game:** requires the external client/server and the fuller controller on `revision/measurement-documentation`. The minimal controller is not a drop-in replacement. `TS_CLIENT` is an optional dependency-location override for that installation.
-- **Comparison with the pilot:** removing the game workload changes the experimental conditions. Validate a new baseline before comparing results.
+- **Minimal client**
+
+  - Omits game UI and conversation APIs.
+  - Its bundle does not load `HomeScreen.ts`, `VoiceChat.ts` or the conversation VAD helper.
+  - `DebugFlags.ts` supplies the logging toggle.
+
+- **Full game**
+
+  - Requires the external client/server and the fuller controller on `revision/measurement-documentation`.
+  - The minimal controller is not a drop-in replacement.
+  - `TS_CLIENT` is an optional dependency-location override for that installation.
+
+- **Comparison with the pilot**
+
+  - Removing the game workload changes the experimental conditions.
+  - Validate a new baseline before comparing results.
 
 | Runtime interface | Purpose |
 |---|---|
@@ -248,9 +322,22 @@ Numerical reproduction is available. Physical timing accuracy and generalized en
 
 ### Validation and SFU comparison
 
-- **Live validation:** the minimal build includes the revised controller at both endpoints. Missing APIs and failed probes are errors. Automated checks do not replace a two-device microphone/playout smoke test or physical rig validation. The game conversation protocol and scene-specific behaviour are outside this host.
-- **SFU setup:** the standalone SFU in `experiments/baseline/` forwards RTP without decoding or mixing audio. Install dependencies with `npm install --prefix experiments/baseline`, then run `node experiments/baseline.cjs`.
-- **SFU measurement limits:** candidate-pair RTT is a network proxy, not measured end-to-end audio delay. The field name `serverMixedOneWayMs` does not establish mixing or validated one-way timing.
+- **Live validation**
+
+  - The minimal build includes the revised controller at both endpoints.
+  - Missing APIs and failed probes are errors.
+  - Automated checks do not replace a two-device microphone/playout smoke test or physical rig validation.
+  - The game conversation protocol and scene-specific behaviour are outside this host.
+
+- **SFU setup**
+
+  - The standalone SFU in `experiments/baseline/` forwards RTP without decoding or mixing audio.
+  - Install dependencies with `npm install --prefix experiments/baseline`, then run `node experiments/baseline.cjs`.
+
+- **SFU measurement limits**
+
+  - Candidate-pair RTT is a network proxy, not measured end-to-end audio delay.
+  - The field name `serverMixedOneWayMs` does not establish mixing or validated one-way timing.
 
 ## Repository layout
 
