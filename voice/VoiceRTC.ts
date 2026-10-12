@@ -14,7 +14,8 @@
  * identity — pure self-organisation.
  *
  * Signalling wire (relayed by the server gateway): the JSON blob is one of
- * {k:'offer'|'answer', sdp, nonce} | {k:'ice', cand} | {k:'bye'}.
+ * {k:'offer'|'answer', sdp, nonce} | {k:'ice', cand} | {k:'bye'}, plus
+ * opt-in measure-request/measure-response messages (see measurement-rpc.ts).
  */
 import { DebugFlags } from "../DebugFlags";
 import { HomeScreen } from "../HomeScreen";
@@ -23,6 +24,7 @@ import { SensorNode } from "./SensorNode";
 import { shouldIgnoreOffer } from "./glare";
 import { mungeDtx } from "./sdp";
 import { AudioStatsProbe } from "./audio-stats";
+import { MeasurementRpc } from "./measurement-rpc";
 import { VadState, newVadState, rmsFromBytes, stepVad, VAD_POLL_MS } from "./vad";
 
 /** Sends one signalling blob to a target player via the server gateway. */
@@ -48,6 +50,8 @@ export class VoiceRTC {
 
     private sendSignal: RtcSignalSender;
     private audioProbe = new AudioStatsProbe();
+    private measurementSharing = readParam("wsnmeasure") === "1";
+    private measurement: MeasurementRpc;
     private nonce: number;               // our perfect-negotiation tie-break
     private peers: Map<number, Peer> = new Map();
     private enabled = false;             // proximity voice is off until turned on
@@ -103,6 +107,12 @@ export class VoiceRTC {
 
     private constructor(sendSignal: RtcSignalSender) {
         this.sendSignal = sendSignal;
+        this.measurement = new MeasurementRpc({
+            send: (index, message) => this.sendSignal(index, JSON.stringify(message)),
+            hasPeer: index => this.enabled && this.peers.has(index),
+            allowed: () => this.measurementSharing,
+            snapshot: index => this.audioProbe.snapshot([...this.peers.values()].filter(peer => peer.index === index)),
+        });
         // High-entropy tie-break for glare resolution; not security-sensitive.
         this.nonce = (Math.floor(Math.random() * 0x7fffffff) ^ (Date.now() & 0xffff)) >>> 0;
     }
@@ -146,6 +156,9 @@ export class VoiceRTC {
                 audioLatency: () => measureAudioLatency(),
                 rxAudio: () => rtc.rxAudio(),
                 audioStats: () => rtc.audioProbe.snapshot([...rtc.peers.values()]),
+                setMeasurementSharing: (on: boolean) => { rtc.measurementSharing = !!on; },
+                measurementSharing: () => rtc.measurementSharing,
+                receiverStats: (peerIndex: number, captureId: string) => rtc.measurement.request(peerIndex, captureId),
                 linkDebug: () => rtc.linkDebug(),
             };
         }
@@ -380,8 +393,12 @@ export class VoiceRTC {
         if (!this.enabled) { return; }
         let msg: any;
         try { msg = JSON.parse(json); } catch { return; }
-        if (msg.k === "bye") { this.closePeer(fromIndex, false); return; }
+        if (msg?.k === "measure-request" || msg?.k === "measure-response") {
+            await this.measurement.handle(fromIndex, msg); return;
+        }
+        if (msg?.k === "bye") { this.closePeer(fromIndex, false); return; }
 
+        if (!["offer", "answer", "ice"].includes(msg?.k)) return;
         const peer = await this.ensurePeer(fromIndex);
         if (!peer) { return; }
 

@@ -14,6 +14,7 @@ function streams(snapshot, type, field) {
     const result = new Map();
     for (const peer of snapshot.peers) {
         if (peer.error) throw new Error("peer stats unavailable");
+        if (typeof snapshot.sessionId !== "string" || typeof peer.connectionId !== "string" || !Array.isArray(peer.reports)) throw new Error("missing connection identity or reports");
         for (const report of peer.reports.filter(r => r.type === type)) {
             if (!Number.isFinite(report[field]) || report[field] < 0 || !Number.isFinite(report.timestamp) ||
                 typeof report.id !== "string" || !Number.isFinite(report.ssrc)) throw new Error(`missing/invalid ${field}, timestamp or stream identity`);

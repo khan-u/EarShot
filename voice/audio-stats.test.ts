@@ -28,6 +28,11 @@ describe("identified audio stats", () => {
         expect(s.peers[0].reports[0]).not.toHaveProperty("jitterBufferDelay");
         expect(s.peers[0].reports[1].selectedCandidatePairId).toBe("pair");
     });
+    it("bounds stalled browser stats collection", async () => {
+        const probe = new AudioStatsProbe(5);
+        const pc = { getStats: () => new Promise(() => {}) } as unknown as RTCPeerConnection;
+        expect((await probe.snapshot([{ index: 1, pc }])).peers[0].error).toBe("getStats failed");
+    });
     it("distinguishes a failed probe from no peers", async () => {
         const probe = new AudioStatsProbe();
         expect((await probe.snapshot([])).peers).toEqual([]);

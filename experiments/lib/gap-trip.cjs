@@ -51,7 +51,11 @@ async function gapTrip(sender, receiver, rec, { dx = -25, timeoutMs = 30000 } = 
     const absent = rec.observations.filter(s => s.phase === "absence");
     // Whole-window rate is unavailable after a connection/report change. The
     // last counter of a closed PC cannot be recovered from endpoint snapshots.
+    if (!absent.length) throw new Error("no absence observations; movement command exceeded the observation window");
     rec.absenceUplink = uplinkRate(baseline.tx, absent.at(-1).tx);
+    const txSamples = [baseline, ...absent];
+    const broken = txSamples.slice(1).map((s, i) => uplinkRate(txSamples[i].tx, s.tx)).find(rate => !rate.valid);
+    if (broken) rec.absenceUplink = { ...broken, invalidReason: "absence sampling interval: " + broken.invalidReason };
     rec.absenceUplink.window = "baseline stats to final absence stats; includes command/probe uncertainty";
     rec.receiverPeerPresentEveryAbsencePoll = absent.every(s => s.rx.peers.length > 0);
     rec.receiverConnectionRetainedEveryAbsencePoll = absent.every(s =>

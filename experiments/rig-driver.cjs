@@ -31,6 +31,7 @@ const path = require("path");
 const fs = require("fs");
 const { spawn, spawnSync, execFileSync } = require("child_process");
 const { stimulusArgs, analyzeCapture } = require("./lib/rig-analysis.cjs");
+const { sampleReceiver, receiverInterval, startTelemetry, summarizeTelemetry, epochMs } = require("./lib/receiver-telemetry.cjs");
 
 // ── config ──────────────────────────────────────────────────────────────────
 const TS_CLIENT = process.env.TS_CLIENT;
@@ -163,22 +164,26 @@ async function loginA(page) {
 
 // ── capture + analyze (real run only) ─────────────────────────────────────────
 function run(cmd, args, opts = {}) {
-    log("$", cmd, args.join(" "));
+    log("$", path.basename(cmd), args.map(a => path.isAbsolute(a) ? path.basename(a) : a).join(" "));
     const r = spawnSync(cmd, args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", ...opts });
     if (r.stdout) process.stdout.write(r.stdout);
     if (r.status !== 0 && r.stderr) process.stderr.write(r.stderr);
     return r;
 }
 
-function record(args) {
+function record(args, timing, directory) {
     log("$ ffmpeg", args.join(" "));
     return new Promise(resolve => {
-        const child = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+        timing.recorderRequestedAtMs = epochMs();
+        const child = spawn("ffmpeg", args, { cwd: directory, stdio: ["ignore", "pipe", "pipe"] });
+        child.once("spawn", () => { timing.recorderSpawnedAtMs = epochMs(); });
         let stdout = "", stderr = "";
         child.stdout.on("data", chunk => { stdout += chunk; });
         child.stderr.on("data", chunk => { stderr += chunk; });
         child.once("error", error => resolve({ status: null, stdout, stderr: stderr + String(error) }));
-        child.once("close", status => resolve({ status, stdout, stderr }));
+        child.once("close", status => {
+            timing.recorderClosedAtMs = epochMs(); resolve({ status, stdout, stderr });
+        });
     });
 }
 
@@ -195,39 +200,64 @@ async function capture(page, runIdx) {
     };
     const status = git("status", "--porcelain");
     const manifest = {
-        schemaVersion: 2, startedAt: new Date().toISOString(), status: "incomplete",
+        schemaVersion: 3, captureId: `rig-${stamp}`, startedAt: new Date().toISOString(), status: "incomplete",
         repositoryCommit: git("rev-parse", "HEAD"), repositoryDirty: status == null ? null : status !== "",
         applicationBuildId: process.env.APP_BUILD_ID || null,
+        receiverApplicationBuildId: process.env.RECEIVER_APP_BUILD_ID || null,
         applicationBuildIdSource: "operator-supplied; not independently verified",
         bursts: BURSTS, amplitude: AMPLITUDE, periodSeconds: 2, captureSeconds: SECS,
         sampleRateHz: 48000, channels: 2, audioIndex,
         minCorrelation: .9, minQualityDb: 6, minLagMs: 30, maxLagMs: 1000,
         returnEndpoint: "phone adapter electrical output",
         senderDiagnostic: null,
+        timing: { clock: "host performance.timeOrigin + performance.now(), milliseconds", wavSampleClockAligned: false },
+        receiverTelemetry: { status: "incomplete", file: "receiver-telemetry.jsonl" },
     };
     let playback = null;
-    let playbackDone = null;
+    let playbackDone = null, monitor = null;
+    const cleanText = value => String(value).split(directory + path.sep).join("").split(RIG + path.sep).join("");
+    const writeTelemetry = sample => fs.appendFileSync(path.join(directory, "receiver-telemetry.jsonl"), JSON.stringify(sample) + "\n");
     try {
-        manifest.stimulusArguments = stimulusArgs(BURSTS, AMPLITUDE, stim);
-        const generation = run(path.join(RIG, "stimulus"), manifest.stimulusArguments);
+        // Require forward receiver flow and emitted samples before playing.
+        const first = await sampleReceiver(page, manifest.captureId);
+        writeTelemetry(first);
+        if (!first.valid) throw new Error("receiver telemetry preflight failed: " + first.error);
+        await sleep(500);
+        const second = await sampleReceiver(page, manifest.captureId);
+        writeTelemetry(second);
+        const preflight = receiverInterval(first, second);
+        manifest.receiverTelemetry.preflight = preflight;
+        if (!preflight.valid) throw new Error("receiver telemetry preflight failed: " + preflight.invalidReason);
+        monitor = startTelemetry(page, manifest.captureId, writeTelemetry);
+        monitor.samples.push(first, second);
+        manifest.stimulusArguments = stimulusArgs(BURSTS, AMPLITUDE, "stimulus.wav");
+        const generation = run(path.resolve(RIG, "stimulus"), manifest.stimulusArguments, { cwd: directory });
         if (generation.status !== 0) throw new Error("stimulus generation failed");
         log(`playing stimulus + recording UCA202 (avf index ${audioIndex}) for ${SECS}s…`);
+        manifest.timing.playbackRequestedAtMs = epochMs();
         playback = spawn("afplay", [stim], { stdio: "ignore" });
         playbackDone = new Promise(resolve => {
             playback.once("error", error => resolve({ error: String(error) }));
             playback.once("close", (code, signal) => resolve({ code, signal }));
         });
         await new Promise((resolve, reject) => {
-            playback.once("spawn", resolve);
+            playback.once("spawn", () => { manifest.timing.playbackSpawnedAtMs = epochMs(); resolve(); });
             playback.once("error", reject);
         });
         manifest.recorderArguments = ["-y", "-f", "avfoundation", "-i", `:${audioIndex}`,
-            "-ar", "48000", "-ac", "2", "-t", String(SECS), rec];
-        const ff = await record(manifest.recorderArguments);
-        fs.writeFileSync(path.join(directory, "recorder.log"), (ff.stdout || "") + (ff.stderr || ""));
+            "-ar", "48000", "-ac", "2", "-t", String(SECS), "recording.wav"];
+        const ff = await record(manifest.recorderArguments, manifest.timing, directory);
+        fs.writeFileSync(path.join(directory, "recorder.log"), cleanText((ff.stdout || "") + (ff.stderr || "")));
         if (playback.exitCode == null) playback.kill();
         manifest.playback = await playbackDone;
         manifest.recorderExitStatus = ff.status;
+        const samples = await monitor.stop();
+        const window = { startMs: manifest.timing.recorderRequestedAtMs, endMs: manifest.timing.recorderClosedAtMs };
+        const telemetry = summarizeTelemetry(samples, window);
+        fs.writeFileSync(path.join(directory, "receiver-summary.json"), JSON.stringify(telemetry, null, 2) + "\n");
+        manifest.receiverTelemetry = { ...manifest.receiverTelemetry, status: telemetry.valid ? "matched-command-window" : "invalid",
+            summaryFile: "receiver-summary.json", commandWindow: window, issues: telemetry.issues };
+        monitor = null;
         if (ff.status !== 0) throw new Error("ffmpeg failed; see recorder.log");
         if (manifest.playback.error || manifest.playback.code !== 0) throw new Error("stimulus playback failed or was truncated; inspect capture timing");
 
@@ -240,30 +270,44 @@ async function capture(page, runIdx) {
                 role: "post-capture laptop inbound KPI; direction/window unmatched" };
         } catch (error) { manifest.senderDiagnostic = { error: String(error) }; }
         const analysis = analyzeCapture(RIG, rec, csv);
-        manifest.analysisArguments = analysis.args;
+        manifest.analysisArguments = analysis.args.map(cleanText);
         manifest.analysisExitStatus = analysis.exitStatus;
         manifest.rawSummary = analysis.summary;
-        fs.writeFileSync(path.join(directory, "analysis.log"), (analysis.stdout || "") + (analysis.stderr || ""));
+        fs.writeFileSync(path.join(directory, "analysis.log"), cleanText((analysis.stdout || "") + (analysis.stderr || "")));
         manifest.status = analysis.summary.kept ? "analyzed" : "no-accepted-events";
         if (!analysis.summary.kept) throw new Error("no events passed the gates; recording and CSV retained");
+        if (!telemetry.valid) {
+            manifest.status = "analyzed-telemetry-invalid";
+            throw new Error("receiver telemetry incomplete; inspect receiver-summary.json before using this capture");
+        }
         log(`run ${runIdx}: unshifted median=${analysis.summary.medianMs} ms; kept=${analysis.summary.kept}/${analysis.summary.analyzed}`);
         return { stamp, rigMedian: analysis.summary.medianMs };
     } catch (error) {
-        manifest.error = String(error);
+        manifest.error = cleanText(error.message);
         if (manifest.status === "incomplete") manifest.status = "failed";
         throw error;
     } finally {
         if (playback && playback.exitCode == null) playback.kill();
         if (playbackDone) manifest.playback = await playbackDone;
+        if (monitor) {
+            try {
+                const samples = await monitor.stop();
+                const window = manifest.timing.recorderClosedAtMs ? { startMs: manifest.timing.recorderRequestedAtMs, endMs: manifest.timing.recorderClosedAtMs } : null;
+                const telemetry = summarizeTelemetry(samples, window);
+                fs.writeFileSync(path.join(directory, "receiver-summary.json"), JSON.stringify(telemetry, null, 2) + "\n");
+                manifest.receiverTelemetry.status = "capture-failed";
+            } catch { manifest.receiverTelemetry.status = "collection-failed"; }
+        }
+        if (manifest.receiverTelemetry.status === "incomplete") manifest.receiverTelemetry.status = "preflight-failed";
         manifest.finishedAt = new Date().toISOString();
         fs.writeFileSync(path.join(directory, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
-        log("capture artifacts saved to", directory);
+        log("capture artifacts saved in", path.basename(directory));
     }
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
 (async () => {
-    log(`Device-A driver | BASE=${BASE} | TS_CLIENT=${TS_CLIENT} | RIG=${RIG}`);
+    log(`Device-A driver | BASE=${BASE}`);
     log(DRY ? "MODE: dry (validate login + peer gate; no audio switch, no capture)" : `MODE: full run (bursts=${BURSTS}, amplitude=${AMPLITUDE}, capture=${SECS}s)`);
 
     let prevOut = null, prevIn = null;
@@ -321,6 +365,7 @@ async function capture(page, runIdx) {
 
         console.log("\n" + "=".repeat(72));
         console.log("  On the phone (device B): log into " + BASE.replace("127.0.0.1", "<this-mac-LAN-IP>"));
+        console.log("      append ?wsnmeasure=1 (or &wsnmeasure=1) to opt into receiver telemetry;");
         console.log("      spawn near Device A (shared home tile is in range), enable voice,");
         console.log("      and make sure its headphone-out is wired to the UCA202 RIGHT input.");
         console.log("=".repeat(72) + "\n");

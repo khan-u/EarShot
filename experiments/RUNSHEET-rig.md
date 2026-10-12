@@ -24,14 +24,14 @@ The driver routes Mac output to the interface and browser input to the built-in 
 
 ## Phone procedure
 
-1. Open the same world, log in near device A, enable voice and grant microphone permission.
+1. Use the revised controller on both devices. On the phone, open the world with `?wsnmeasure=1` (or append `&wsnmeasure=1` to an existing query), log in near device A, enable voice and grant microphone permission. The signalling relay must forward `measure-request` / `measure-response` JSON messages without truncation; the receiver opts into these read-only stats requests.
 2. Keep the tab foregrounded and the phone awake; disable Low Power Mode for a consistent session. Record OS/browser versions, volume, adapter and power state.
 3. Confirm that the adapter output reaches interface IN R. Keep placement and volume fixed within a session.
 4. Leave the phone connected between repeated captures, and verify RTP flow before continuing.
 
 ## Run from the repository root
 
-First set `TS_CLIENT` to the external client path and `BASE_URL` to the world URL. Record the actual deployed application identifier in `APP_BUILD_ID` when available; omitting it leaves a documented null, not a verified build identity.
+First set `TS_CLIENT` to the external client path and `BASE_URL` to the world URL. Record the deployed sender identifier in `APP_BUILD_ID` and phone identifier in `RECEIVER_APP_BUILD_ID` when available; omitting it leaves a documented null, not a verified build identity.
 
 ```bash
 make -C rig check
@@ -54,7 +54,11 @@ The nominal stimulus is a 2 kHz, 5 ms Hann-windowed burst every 2 s. The driver 
 
 Each `experiments/runs/rig-<timestamp>/` bundle contains the generated stimulus, recording, `latency-uncalibrated.csv`, logs and `manifest.json` when the corresponding stage completes. The manifest records settings, repository commit/dirty status, optional application build ID, process outcomes and an unshifted summary. Failed runs retain available artifacts and a failure reason. A successful analysis status means events passed numerical gates; it does not certify the physical setup.
 
-The post-capture laptop KPI is stored separately as a sender diagnostic. No `--est-median` alignment is applied and no automatic software calibration is set. Collect receiver-side telemetry with the same direction, peer and time window separately before claiming estimator agreement.
+The driver performs two receiver probes before stimulus playback and requires advancing received/emitted counters on a matching SSRC. During each capture it collects serial nominal 500 ms receiver samples in `receiver-telemetry.jsonl`, with a `receiver-summary.json` describing usable intervals, failures and coverage. A missing API, receiver opt-in or relay support makes preflight fail. Keep exactly one phone peer connected and the phone tab visible. Both browser builds need the revised controller; the repository hash alone does not identify either deployed application build.
+
+The telemetry preserves raw stats and session/connection/stream identifiers. Request/reply timestamps bound the receiver clock's offset from the recorder host. Only receiver intervals wholly inside the recorder command window under those bounds contribute to the model median. Counter resets, no progress and connection changes do not fall back to lifetime means. The selected transport's candidate pair supplies RTT; the model retains an explicit assumed 40 ms term. Sampling failures, uncovered command-window boundaries and request-start gaps over four nominal polling intervals invalidate the summary. Inspect all intervals and missing fields, including unavailable selected-pair RTTs.
+
+The post-capture laptop KPI remains a separate sender diagnostic. No `--est-median` alignment or automatic software calibration is applied. Telemetry is associated with a capture, direction and command window; exact WAV sample-clock alignment, physical timing and burst-level agreement are still unverified. The driver retains acoustic results but exits unsuccessfully when telemetry checks fail. Measure the extra signalling/probe overhead during validation before planning study runs.
 
 ## Analysis and checks
 

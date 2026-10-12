@@ -30,6 +30,7 @@ export class AudioStatsProbe {
     private ids = new WeakMap<RTCPeerConnection, string>();
     private nextId = 0;
     readonly sessionId = crypto.randomUUID();
+    constructor(private timeoutMs = 2000) {}
 
     async snapshot(peers: StatsPeer[]): Promise<AudioSnapshot> {
         const now = () => performance.timeOrigin + performance.now();
@@ -47,8 +48,12 @@ export class AudioStatsProbe {
                 iceConnectionState: pc.iceConnectionState,
                 startedAtMs: now(), finishedAtMs: 0, error: null, reports: [],
             };
+            let timer: ReturnType<typeof setTimeout> | undefined;
             try {
-                const stats = await pc.getStats();
+                const stats = await Promise.race([
+                    pc.getStats(),
+                    new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("stats timeout")), this.timeoutMs); }),
+                ]);
                 stats.forEach((report: any) => {
                     const audio = (report.kind ?? report.mediaType) === "audio";
                     if (!((audio && ["inbound-rtp", "outbound-rtp"].includes(report.type)) ||
@@ -61,6 +66,7 @@ export class AudioStatsProbe {
                     peer.reports.push(clean);
                 });
             } catch { peer.error = "getStats failed"; }
+            finally { if (timer) clearTimeout(timer); }
             peer.finishedAtMs = now();
             snapshot.peers.push(peer);
         }
