@@ -41,7 +41,7 @@ async function join(name: string): Promise<void> {
     const url = new URL("/signal", location.href); url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
     socket = new WebSocket(url);
     rtc = VoiceRTC.init((target, json) => send({ type: "signal", target, json }),
-        { showUi: false, applicationBuildId: __EXPERIMENT_BUILD__.buildId });
+        { applicationBuildId: __EXPERIMENT_BUILD__.buildId });
     if (!rtc) throw new Error("voice controller unavailable");
     w.wsnVoiceCtl.setMeasurementSharing(input("measurement").checked);
     w.wsnVoiceCtl.setGrace(Number(input("grace").value)); w.wsnVoiceCtl.setDtx(input("dtx").checked);

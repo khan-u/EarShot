@@ -4,7 +4,7 @@
 
 PROX-VOICE emulates proximity-based neighbour relationships in a browser-based virtual world. Browsers establish WebRTC audio links to nearby peers, with a grace window before departing links are removed. Media normally travels directly between peers, with TURN available as a relay. Discovery and signalling use the game server. This is a virtual proximity overlay, not a physical MANET routing implementation.
 
-This branch contains a [minimal browser experiment client](client/README.md), a room signalling server, the revised voice modules, C++ measurement rig, harnesses and archived study data. Both experiment devices load the same revised voice code without the game application. The complete game still requires its external client and server. `DebugFlags.ts` and `HomeScreen.ts` provide integration stubs; the latter has a no-op UI update method.
+This repository contains a [minimal browser experiment client](client/README.md), a room signalling server, the revised voice modules, C++ measurement rig, harnesses and archived study data. Both experiment devices load the same revised voice code without the game application. The complete game still requires its external client and server. `DebugFlags.ts` supplies the logging toggle. The minimal bundle does not load the game integration files `HomeScreen.ts`, `VoiceChat.ts` or the conversation VAD helper.
 
 <p align="center"><img src="docs/figures/architecture.png" width="420" alt="Game-server control plane, peer-to-peer media, and TURN fallback"></p>
 
@@ -121,7 +121,7 @@ The aggregation reproduces stored telemetry rather than validating every label o
 
 Start the minimal host with `npm ci`, `npm run build:client` and `npm run start:client`. The [client instructions](client/README.md) cover joining, trusted HTTPS for the phone, optional TURN and supported scenarios. Set `BASE_URL` to its reachable secure URL and room; the harnesses use this repository's Playwright dependency and installed standard Chrome. The Mac rig also needs `afplay`, `ffmpeg` with AVFoundation support, `SwitchAudioSource`, and the physical wiring in the [runsheet](experiments/RUNSHEET-rig.md).
 
-Full game experiments still require the external application with the revised controller. `TS_CLIENT` remains an optional dependency-location override for that installation. Removing the game workload changes the experimental conditions; validate a new baseline before comparing this client with the pilot.
+Full game experiments still require the external application and the fuller controller retained on `revision/measurement-documentation`. The minimal controller omits game UI and conversation APIs; it is not a drop-in controller for that game integration. `TS_CLIENT` remains an optional dependency-location override for that installation. Removing the game workload changes the experimental conditions; validate a new baseline before comparing this client with the pilot.
 
 | Runtime interface | Purpose |
 |---|---|

@@ -7,7 +7,7 @@ const root = path.resolve(__dirname, "..");
 const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 const hash = data => createHash("sha256").update(data).digest("hex");
 (async () => {
-    const files = ["package.json", "package-lock.json", "HomeScreen.ts", "DebugFlags.ts",
+    const files = ["package.json", "package-lock.json", "DebugFlags.ts",
         ...fs.readdirSync(path.join(root, "voice")).filter(n => n.endsWith(".ts") && !n.endsWith(".test.ts")).map(n => "voice/" + n),
         ...fs.readdirSync(__dirname).filter(n => /\.(ts|html|css|cjs|json)$/.test(n) && !n.includes(".test.")).map(n => "client/" + n)].sort();
     const sourceHashes = Object.fromEntries(files.map(name => [name, hash(fs.readFileSync(path.join(root, name)))]));
