@@ -2,6 +2,8 @@
 
 This client provides a room, integer tile positions, proximity discovery and the audio controls needed by the rig and packet-gap experiments. Both devices load the same bundle and the same revised `voice/VoiceRTC.ts`; there is no separate receiver implementation to keep in sync. No game assets, accounts or game server are required.
 
+The included server serves the browser client and coordinates room membership, tile positions, voice signalling and measurement messages. `npm run start:client` starts this single server process. Audio travels through WebRTC, directly or through TURN.
+
 ## Start the client
 
 Use Node.js 22.12 or later and an installed standard Google Chrome for the Mac automation. Browser installation is not part of `npm ci`. Run these commands from the repository root:
@@ -28,7 +30,7 @@ The default ICE configuration supplies a STUN server. If the devices require TUR
 
 On the phone, open the experiment URL with `?room=earshot&name=Phone&wsnmeasure=1`, join and enable voice. Keep the page visible and the phone awake. If playback is blocked, use **Resume received audio**. The receiver measurements checkbox is an explicit opt-in to requests from room peers.
 
-Set `BASE_URL` to that same HTTPS origin and room on the Mac, then use the [rig runsheet](../experiments/RUNSHEET-rig.md). For example, after setting `BASE_URL`:
+Set `BASE_URL` to that same HTTPS origin and room on the Mac, then use the [rig runsheet](../experiments/RUNSHEET-rig.md). The harness opens and joins the Mac sender automatically; close any manually joined Mac participant before starting it so the phone has exactly one peer. For example, after setting `BASE_URL`:
 
 ```bash
 make -C rig check

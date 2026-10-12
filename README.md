@@ -182,7 +182,9 @@ Inspect these filters when interpreting sample sizes.
 
 ## Live experiments
 
-### Start the host
+### Start the client and room server
+
+`npm run start:client` starts the included server. It serves the browser client, manages room membership and tile positions, and relays voice signalling and measurement messages. Audio travels through WebRTC, directly or through TURN; no separate game server is needed.
 
 Run from the repository root:
 
@@ -192,9 +194,11 @@ npm run build:client
 npm run start:client
 ```
 
-- Follow the [client instructions](client/README.md) for joining, trusted HTTPS on the phone, optional TURN and supported scenarios.
-- Set `BASE_URL` to the reachable secure URL and room. Harnesses use this repository's Playwright dependency and installed standard Chrome.
-- Mac rig captures require `afplay`, `ffmpeg` with AVFoundation support, `SwitchAudioSource`, and the physical wiring in the [runsheet](experiments/RUNSHEET-rig.md).
+- **Local access:** the default server is available at `http://localhost:5001` on the Mac. It listens only on loopback; this address is not a phone-accessible setup.
+- **Two-device access:** configure a reachable HTTPS address trusted by the phone, using the [TLS or reverse-proxy instructions](client/README.md#start-the-client). Use that address on both devices. Plain HTTP to the Mac's LAN address does not provide phone microphone access.
+- **Manual audio check:** join the same room with different participant names, then enable voice and grant microphone permission on both devices. The [client instructions](client/README.md) also cover optional TURN and supported scenarios.
+- **Automated rig capture:** join and enable voice on the phone with `?wsnmeasure=1`, keeping its page visible and the phone awake. Set `BASE_URL` to the same HTTPS address and room. The harness opens and joins the Mac sender automatically; close any manually joined Mac participant first. Harnesses use this repository's Playwright dependency and installed standard Chrome.
+- **Physical rig:** Mac captures require `afplay`, `ffmpeg` with AVFoundation support, `SwitchAudioSource`, and the wiring in the [runsheet](experiments/RUNSHEET-rig.md).
 
 ### Supported host and interfaces
 
