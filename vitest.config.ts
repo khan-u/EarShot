@@ -5,7 +5,7 @@ import { defineConfig } from "vitest/config";
 // plain node environment with no browser shims.
 export default defineConfig({
   test: {
-    include: ["voice/**/*.test.ts"],
+    include: ["voice/**/*.test.ts", "client/**/*.test.ts"],
     environment: "node",
   },
 });

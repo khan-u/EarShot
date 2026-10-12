@@ -6,6 +6,12 @@ const fake = (reports: object[], fail = false) => ({
 }) as unknown as RTCPeerConnection;
 
 describe("identified audio stats", () => {
+    it("reports the loaded application build when supplied", async () => {
+        const probe = new AudioStatsProbe();
+        expect((await probe.snapshot([])).applicationBuildId).toBeNull();
+        probe.applicationBuildId = "build-123";
+        expect((await probe.snapshot([])).applicationBuildId).toBe("build-123");
+    });
     it("keeps connection identity stable and changes it on replacement at the same peer index", async () => {
         const probe = new AudioStatsProbe(), pc = fake([]);
         const a = await probe.snapshot([{ index: 7, pc }]);

@@ -8,8 +8,8 @@
 const path = require("path");
 
 /** Absolute path to the directory containing node_modules/playwright-core.
- *  Set TS_CLIENT in the environment to the game client installation root. */
-const TS_CLIENT = process.env.TS_CLIENT;
+ *  Defaults to this repository; TS_CLIENT can override the dependency root. */
+const TS_CLIENT = process.env.TS_CLIENT || path.resolve(__dirname, "../..");
 
 /** Chromium launch flags that enable a headless fake microphone, bypass autoplay
  *  policy, and route GPU work through Metal/ANGLE for stability on Apple silicon. */
@@ -59,6 +59,10 @@ async function bootContext(browser, baseUrl, { stripProcessing = false } = {}) {
  * credentials, submit, then wait for wsnGame.loggedIn() to become true.
  */
 async function loginPage(page, user, pass) {
+    if (await page.evaluate(() => typeof window.proxExperiment?.join === "function")) {
+        await page.evaluate(name => window.proxExperiment.join(name), user);
+        return;
+    }
     await page.waitForFunction(
         () => {
             const b = [...document.querySelectorAll("button")]

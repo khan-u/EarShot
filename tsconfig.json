@@ -12,5 +12,5 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true
   },
-  "include": ["voice", "DebugFlags.ts", "HomeScreen.ts"]
+  "include": ["voice", "DebugFlags.ts", "HomeScreen.ts", "client/*.ts"]
 }

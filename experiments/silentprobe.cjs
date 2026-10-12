@@ -31,7 +31,7 @@ const fmt = (arr) => arr.map((d) => `#${d.index} ${d.conn}/${d.sig}/${d.ice} out
 
     for (let k = 1; k <= BOOTS; k++) {
         const UID     = Date.now().toString(36).slice(-6);
-        const browser = await chromium.launch({ headless: !process.env.HEADED, args: FAKE_TONE });
+        const browser = await chromium.launch({ channel: "chrome", headless: !process.env.HEADED, args: FAKE_TONE });
         try {
             const ctxA = await bootContext(browser, BASE, { stripProcessing: true });
             const ctxB = await bootContext(browser, BASE);

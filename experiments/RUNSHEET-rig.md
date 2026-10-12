@@ -4,8 +4,8 @@ This procedure describes the revised driver. The five pilot captures and their o
 
 ## Requirements
 
-- A running external game client/server reachable from the Mac and phone, with the controller hooks listed in the root README. Supply `TS_CLIENT` and `BASE_URL`; the phone needs a secure origin for microphone access.
-- Playwright-core and Chromium in the external client installation. The Mac runs headful with a real microphone; the phone is operated manually.
+- The [minimal experiment client](../client/README.md) and its room server, reachable from the Mac and phone over trusted HTTPS, or an external game host with the same revised controller APIs. Set `BASE_URL` to the shared origin and room.
+- Root dependencies installed with `npm ci` and standard Google Chrome installed on the Mac. The Mac runs headful with a real microphone; the phone is operated manually. `TS_CLIENT` is only needed to override the dependency location for a legacy installation.
 - macOS `afplay`, `ffmpeg` with AVFoundation input, and `SwitchAudioSource` on PATH.
 - Stereo USB audio interface (pilot: UCA202, normally named `USB Audio CODEC`), cables, earbud and phone audio adapter.
 - `make -C rig check` passing from the repository root. This checks ideal synthetic delay recovery, not hardware timing.
@@ -24,14 +24,14 @@ The driver routes Mac output to the interface and browser input to the built-in 
 
 ## Phone procedure
 
-1. Use the revised controller on both devices. On the phone, open the world with `?wsnmeasure=1` (or append `&wsnmeasure=1` to an existing query), log in near device A, enable voice and grant microphone permission. The signalling relay must forward `measure-request` / `measure-response` JSON messages without truncation; the receiver opts into these read-only stats requests.
+1. Use the revised controller on both devices. On the phone, open the client with `?wsnmeasure=1` (or append `&wsnmeasure=1` to an existing query), join the same room at the initial tile (or log in near device A in the game), enable voice and grant microphone permission. The signalling relay must forward `measure-request` / `measure-response` JSON messages without truncation; the receiver opts into these read-only stats requests.
 2. Keep the tab foregrounded and the phone awake; disable Low Power Mode for a consistent session. Record OS/browser versions, volume, adapter and power state.
 3. Confirm that the adapter output reaches interface IN R. Keep placement and volume fixed within a session.
 4. Leave the phone connected between repeated captures, and verify RTP flow before continuing.
 
 ## Run from the repository root
 
-First set `TS_CLIENT` to the external client path and `BASE_URL` to the world URL. Record the deployed sender identifier in `APP_BUILD_ID` and phone identifier in `RECEIVER_APP_BUILD_ID` when available; omitting it leaves a documented null, not a verified build identity.
+Build and start the minimal host as described in its instructions, then set `BASE_URL` to its secure URL and room. Its embedded build ID is reported by both endpoints and the matching `client-build.json` is archived with each capture. For legacy hosts, record available sender and phone identifiers in `APP_BUILD_ID` and `RECEIVER_APP_BUILD_ID`; these remain optional operator assertions, with missing identifiers recorded as null.
 
 ```bash
 make -C rig check
@@ -48,13 +48,13 @@ node experiments/rig-driver.cjs --runs 5 --bursts 60 --amp 0.4
 | `--audio-index N` | Override the AVFoundation index resolved from the device name |
 | `--dry` | Exercise login and the live peer gate without switching audio or capturing |
 
-`--dry` still needs the external application and a responding phone peer. It can wait up to the configured peer timeout. Interactive access gates may require the operator to clear the page and press Enter. Audio input/output selection is normally restored after the session; inspect routing after an abnormal exit.
+`--dry` still needs the running host and a responding phone peer. It can wait up to the configured peer timeout. Interactive access gates may require the operator to clear the page and press Enter. Audio input/output selection is normally restored after the session; inspect routing after an abnormal exit.
 
 The nominal stimulus is a 2 kHz, 5 ms Hann-windowed burst every 2 s. The driver starts playback, then requests a 48 kHz stereo recording, so early stimulus events may precede acquisition. Neither the requested rate nor duration verifies continuity or physical elapsed time. This startup sequence and the recording time base need checking with the actual interface before collecting submission data.
 
 Each `experiments/runs/rig-<timestamp>/` bundle contains the generated stimulus, recording, `latency-uncalibrated.csv`, logs and `manifest.json` when the corresponding stage completes. The manifest records settings, repository commit/dirty status, optional application build ID, process outcomes and an unshifted summary. Failed runs retain available artifacts and a failure reason. A successful analysis status means events passed numerical gates; it does not certify the physical setup.
 
-The driver performs two receiver probes before stimulus playback and requires advancing received/emitted counters on a matching SSRC. During each capture it collects serial nominal 500 ms receiver samples in `receiver-telemetry.jsonl`, with a `receiver-summary.json` describing usable intervals, failures and coverage. A missing API, receiver opt-in or relay support makes preflight fail. Keep exactly one phone peer connected and the phone tab visible. Both browser builds need the revised controller; the repository hash alone does not identify either deployed application build.
+The driver performs two receiver probes before stimulus playback and requires advancing received/emitted counters on a matching SSRC. During each capture it collects serial nominal 500 ms receiver samples in `receiver-telemetry.jsonl`, with a `receiver-summary.json` describing usable intervals, failures and coverage. A missing API, receiver opt-in or relay support makes preflight fail. Keep exactly one phone peer connected and the phone tab visible. Both browser builds need the revised controller. The minimal server enforces the same embedded build ID for room members, and capture preflight checks that both endpoint IDs match the served build manifest. The repository hash alone does not identify a legacy application build.
 
 The telemetry preserves raw stats and session/connection/stream identifiers. Request/reply timestamps bound the receiver clock's offset from the recorder host. Only receiver intervals wholly inside the recorder command window under those bounds contribute to the model median. Counter resets, no progress and connection changes do not fall back to lifetime means. The selected transport's candidate pair supplies RTT; the model retains an explicit assumed 40 ms term. Sampling failures, uncovered command-window boundaries and request-start gaps over four nominal polling intervals invalidate the summary. Inspect all intervals and missing fields, including unavailable selected-pair RTTs.
 

@@ -27,8 +27,8 @@ async function runGapHarness(kind, graceMs, absenceMs) {
     };
     let a, b;
     try {
-        a = await chromium.launch({ headless: !process.env.HEADED, args });
-        b = await chromium.launch({ headless: !process.env.HEADED, args: FAKE_MEDIA_ARGS });
+        a = await chromium.launch({ channel: "chrome", headless: !process.env.HEADED, args });
+        b = await chromium.launch({ channel: "chrome", headless: !process.env.HEADED, args: FAKE_MEDIA_ARGS });
         const ca = await bootContext(a, base, { stripProcessing: true });
         const cb = await bootContext(b, base);
         const pa = await ca.newPage(), pb = await cb.newPage();

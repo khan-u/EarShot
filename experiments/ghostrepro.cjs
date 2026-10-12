@@ -21,7 +21,7 @@ const UID  = Date.now().toString(36).slice(-6);
     // 1-2: ghost client, then SIGKILL its whole browser process tree. A unique
     // marker arg lets pkill target exactly this browser without affecting others.
     const marker   = "--wsn-ghost-marker=" + UID;
-    const gBrowser = await chromium.launch({ headless: !process.env.HEADED, args: FAKE_MEDIA_ARGS.concat([marker]) });
+    const gBrowser = await chromium.launch({ channel: "chrome", headless: !process.env.HEADED, args: FAKE_MEDIA_ARGS.concat([marker]) });
     const gCtx     = await bootContext(gBrowser, BASE);
     const gPage    = await gCtx.newPage();
     await gPage.goto(BASE, { waitUntil: "domcontentloaded" });
@@ -34,7 +34,7 @@ const UID  = Date.now().toString(36).slice(-6);
     await sleep(3000);   // give the server time to notice (or not)
 
     // 3: probe — does the corpse still stand at spawn?
-    const pBrowser = await chromium.launch({ headless: !process.env.HEADED, args: FAKE_MEDIA_ARGS });
+    const pBrowser = await chromium.launch({ channel: "chrome", headless: !process.env.HEADED, args: FAKE_MEDIA_ARGS });
     try {
         const pCtx  = await bootContext(pBrowser, BASE);
         const pPage = await pCtx.newPage();

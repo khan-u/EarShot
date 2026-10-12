@@ -39,3 +39,7 @@ experiments/.rig-profile/
 *.toc
 
 experiments/report/
+
+# Experimental browser build and local TLS material
+client-dist/
+client-secrets/

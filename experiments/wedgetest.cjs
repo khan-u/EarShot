@@ -34,7 +34,7 @@ const pos   = (page) => page.evaluate(() => window.wsnGame ? window.wsnGame.pos(
     fs.mkdirSync(ASSETS, { recursive: true });
     ensureToneWav(TONE_WAV);
 
-    const browser = await chromium.launch({ headless: !process.env.HEADED, args: FAKE_TONE });
+    const browser = await chromium.launch({ channel: "chrome", headless: !process.env.HEADED, args: FAKE_TONE });
     try {
         const ctxA = await bootContext(browser, BASE, { stripProcessing: true });
         const ctxB = await bootContext(browser, BASE);

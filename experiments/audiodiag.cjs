@@ -21,7 +21,7 @@ const { readAudioStats } = require("./lib/audio-probes.cjs");
 const snap = page => page.evaluate(readAudioStats);
 
 (async () => {
-    const browser = await chromium.launch({ headless: !process.env.HEADED, args: FAKE_MEDIA_ARGS });
+    const browser = await chromium.launch({ channel: "chrome", headless: !process.env.HEADED, args: FAKE_MEDIA_ARGS });
     try {
         const ctxA = await bootContext(browser, BASE);
         const ctxB = await bootContext(browser, BASE);

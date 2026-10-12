@@ -4,13 +4,14 @@
 
 PROX-VOICE emulates proximity-based neighbour relationships in a browser-based virtual world. Browsers establish WebRTC audio links to nearby peers, with a grace window before departing links are removed. Media normally travels directly between peers, with TURN available as a relay. Discovery and signalling use the game server. This is a virtual proximity overlay, not a physical MANET routing implementation.
 
-This repository contains the voice modules, C++ measurement rig, experiment harnesses, and archived study data. Running the complete application requires the external game client and server. `DebugFlags.ts` and `HomeScreen.ts` provide integration stubs; the latter has a no-op UI update method.
+This branch contains a [minimal browser experiment client](client/README.md), a room signalling server, the revised voice modules, C++ measurement rig, harnesses and archived study data. Both experiment devices load the same revised voice code without the game application. The complete game still requires its external client and server. `DebugFlags.ts` and `HomeScreen.ts` provide integration stubs; the latter has a no-op UI update method.
 
 <p align="center"><img src="docs/figures/architecture.png" width="420" alt="Game-server control plane, peer-to-peer media, and TURN fallback"></p>
 
 ## Repository layout
 
 ```text
+client/                Minimal browser host, signalling server and source provenance
 voice/                 TypeScript voice, negotiation, sensing and KPI modules
 rig/                   C++17 stimulus generator, stereo WAV analyzer and fixtures
   tests/               C++ DSP/WAV unit tests and Python synthetic recovery checks
@@ -62,7 +63,7 @@ The software model already includes 40 ms. Adding the mean residual would give a
 
 ### Provenance and unresolved checks
 
-The EarShot artifact is [`ea7d2c6a6d880a1c41d97e4ca533b17441202c93`](https://github.com/khan-u/prox-voice/tree/ea7d2c6a6d880a1c41d97e4ca533b17441202c93). It identifies the archived repository code and data. The archive does not pin the deployed external game-client build used during capture; this is a provenance gap, not evidence that a different build was used. The revised harnesses on this branch postdate those recordings.
+The EarShot artifact is [`ea7d2c6a6d880a1c41d97e4ca533b17441202c93`](https://github.com/khan-u/prox-voice/tree/ea7d2c6a6d880a1c41d97e4ca533b17441202c93), which identifies the archived code and data. The exact browser builds used during capture were not recorded; see the [source provenance note](client/PROVENANCE.md). The revised harnesses and minimal host postdate those recordings.
 
 Recorded reference-event spacing is approximately 1.53–1.77 s across captures, despite a nominal 2 s stimulus period. Capture durations and event counts also differ from the nominal sequence. Recording continuity, stimulus configuration and time-base accuracy need physical checks before treating the estimates as validated timing. A single global rescaling is not justified by these observations.
 
@@ -75,7 +76,7 @@ Run all commands below from the repository root.
 | Component | Requirement |
 |---|---|
 | Rig and recovery tests | C++17 compiler, `make`, Python >= 3.9 |
-| TypeScript tests | Node.js >= 18 and dependencies installed with `npm ci` |
+| TypeScript tests | Node.js >= 22.12 and dependencies installed with `npm ci` |
 | Helper tests | Node.js >= 18; no browser/application needed |
 | Historical aggregation | Python >= 3.9, standard library only |
 | Figures | Python >= 3.9 and Matplotlib (requirements file below) |
@@ -87,10 +88,12 @@ make -C rig check
 npm ci
 npm test
 npm run typecheck
-TS_CLIENT="$PWD" node --test experiments/lib/*.test.cjs
+node --test experiments/lib/*.test.cjs
+npm run build:client
+npm run test:client
 ```
 
-The `TS_CLIENT` placeholder in the last command only satisfies the helper module's configuration check; those tests do not launch the game. `make check` runs C++ unit tests and enforces unshifted synthetic recovery at 40, 85, 150 and 450 ms, with varied gain, noise and pre-roll: all 20 events must pass, median error must be <=0.1 ms, and each event's error <=0.25 ms. Disconnected-return and silent-reference controls must accept no events. These tolerances apply to the specified ideal fixtures, not to physical recordings. The analyzer exits with status 3 when no events pass its gates.
+The helper and client tests do not launch a browser; the server test binds a temporary loopback port. `make check` runs C++ unit tests and enforces unshifted synthetic recovery at 40, 85, 150 and 450 ms, with varied gain, noise and pre-roll: all 20 events must pass, median error must be <=0.1 ms, and each event's error <=0.25 ms. Disconnected-return and silent-reference controls must accept no events. These tolerances apply to the specified ideal fixtures, not to physical recordings. The analyzer exits with status 3 when no events pass its gates.
 
 ### Re-analyze recordings and regenerate figures
 
@@ -116,7 +119,9 @@ The aggregation reproduces stored telemetry rather than validating every label o
 
 ## Live experiments
 
-Live game experiments need the external browser client, game server, its runtime hooks, and Playwright-core/Chromium installation. Root `npm ci` installs the local tests, not that application. Set `TS_CLIENT` to the client installation containing `node_modules/playwright-core`, and `BASE_URL` to the world URL. The phone needs a reachable secure origin and microphone permission. The Mac rig additionally needs `afplay`, `ffmpeg` with AVFoundation support, `SwitchAudioSource`, and the physical wiring in the [runsheet](experiments/RUNSHEET-rig.md).
+Start the minimal host with `npm ci`, `npm run build:client` and `npm run start:client`. The [client instructions](client/README.md) cover joining, trusted HTTPS for the phone, optional TURN and supported scenarios. Set `BASE_URL` to its reachable secure URL and room; the harnesses use this repository's Playwright dependency and installed standard Chrome. The Mac rig also needs `afplay`, `ffmpeg` with AVFoundation support, `SwitchAudioSource`, and the physical wiring in the [runsheet](experiments/RUNSHEET-rig.md).
+
+Full game experiments still require the external application with the revised controller. `TS_CLIENT` remains an optional dependency-location override for that installation. Removing the game workload changes the experimental conditions; validate a new baseline before comparing this client with the pilot.
 
 | Runtime interface | Purpose |
 |---|---|
@@ -132,14 +137,14 @@ Live game experiments need the external browser client, game server, its runtime
 
 `wsnVoice.setCalibrationMs(C)` remains a manual additive-offset API; calling it sets a software flag, not a scientific validation status. The revised capture driver does not call it or shift acoustic results to match software.
 
-After supplying the external application and environment:
+After starting the host and configuring the devices:
 
 ```bash
 node experiments/rig-driver.cjs --runs 5 --amp 0.4
 node experiments/audiogap.cjs 9
 ```
 
-The rig saves separate per-run stimulus/WAV/raw CSV/log/manifest bundles under `experiments/runs/` (override with `RIG_DATA_DIR`). It records the repository commit, dirty status, and optional operator-supplied `APP_BUILD_ID` (sender) and `RECEIVER_APP_BUILD_ID` (phone). Those identifiers must be obtained from the respective deployed applications; they are not discovered or verified by the driver. The sender KPI remains a separately labelled diagnostic. Each capture also saves `receiver-telemetry.jsonl` and `receiver-summary.json`. Both endpoints must contain the revised controller; the phone must opt in with `?wsnmeasure=1` (or `&wsnmeasure=1`), and the host signalling relay must pass the additional `measure-request` and `measure-response` JSON messages without truncation. No server change is included in this repository. The capture preflight verifies request/reply operation, exactly one connected peer, matching sender-outbound/receiver-inbound SSRC, and advancing received/emitted counters. Missing support stops the run before stimulus playback.
+The rig saves separate per-run stimulus/WAV/raw CSV/log/manifest bundles under `experiments/runs/` (override with `RIG_DATA_DIR`). It records the repository commit, dirty status, and optional operator-supplied `APP_BUILD_ID` (sender) and `RECEIVER_APP_BUILD_ID` (phone). These optional identifiers remain operator assertions. For the minimal client, the driver also records the embedded build IDs reported by both endpoints and archives the matching served manifest as `client-build.json`; unequal or partially identified endpoint builds fail preflight. The sender KPI remains a separately labelled diagnostic. Each capture also saves `receiver-telemetry.jsonl` and `receiver-summary.json`. Both endpoints must contain the revised controller; the phone must opt in with `?wsnmeasure=1` (or `&wsnmeasure=1`), and the host signalling relay must pass the additional `measure-request` and `measure-response` JSON messages without truncation. The minimal room server included here forwards these messages. A legacy game host needs equivalent relay support. The capture preflight verifies request/reply operation, exactly one connected peer, matching sender-outbound/receiver-inbound SSRC, and advancing received/emitted counters. Missing support stops the run before stimulus playback.
 
 Receiver samples retain browser-session, connection, report and SSRC identities, raw counters, request/reply timestamps, visibility and selected-pair joins. A bounded, serial request loop collects them around each recorder command window. Four timestamps bound the receiver-to-host clock offset without assuming symmetric signalling delays; browser stats timestamps are mapped with those bounds. Interval jitter-buffer residence uses counter differences only. Missing intervals, identity changes and long sampling gaps invalidate the telemetry summary. The interval model median keeps the assumed 40 ms term explicit and does not adjust the acoustic measurement.
 
@@ -149,7 +154,7 @@ The gap and grace harnesses now use `audioStats()`, monotonic host timestamps an
 
 New formation, DTX and gap records use `schemaVersion: 3` and `identified` filenames under `experiments/runs/` (override with `EXPERIMENT_DATA_DIR`). They retain raw stats and invalid reasons. Bandwidth uses per-stream byte and timestamp differences and becomes unavailable after stream changes, counter resets or missing reports. A grace absence rate spans the baseline and final absence snapshots, with their command/probe uncertainty; a closed connection makes that whole-window rate unavailable. Peer retention means presence at every sampled poll, not proof of uninterrupted connectivity. Historical aggregation remains separate.
 
-**Live integration still required:** the revised controller must be built into the external application before running these harnesses. Missing APIs and failed probes are errors. Game movement, sensing and UI hooks still come from that host application. Automated helper checks do not replace an application smoke test or a physical rig validation run.
+**Live validation still required:** the minimal build includes the revised controller at both endpoints. Missing APIs and failed probes are errors. The game conversation protocol and scene-specific behaviour are absent from this host. Automated checks do not replace a two-device microphone/playout smoke test or a physical rig validation run.
 
 The standalone SFU in `experiments/baseline/` forwards RTP; it does not decode and mix audio. Install its dependencies with `npm install --prefix experiments/baseline` before running `node experiments/baseline.cjs`. Its candidate-pair RTT output is a network proxy, not measured end-to-end audio delay. Historical names such as `serverMixedOneWayMs` should not be interpreted as evidence of mixing or validated one-way timing.
 

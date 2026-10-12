@@ -19,6 +19,8 @@ async function readReceiver({ captureId }) {
 function matchReceiver(sample) {
     const { sender, senderAfter, reply } = sample.exchange;
     const receiver = reply.snapshot;
+    const builds = [sender.applicationBuildId, senderAfter.applicationBuildId, receiver.applicationBuildId];
+    if (builds.some(Boolean) && (!builds.every(Boolean) || new Set(builds).size !== 1)) throw new Error("sender/receiver client build mismatch");
     if (reply.captureId !== sample.captureId || reply.peerIndex !== sender.peers[0]?.peerIndex ||
         sender.peers.length !== 1 || receiver.peers?.length !== 1 ||
         receiver.peers[0].connectionState !== "connected" || receiver.visibility !== "visible") throw new Error("capture, peer, receiver visibility or connection mismatch");
@@ -43,7 +45,8 @@ function matchReceiver(sample) {
     const transport = reports.find(r => r.id === stream.report.transportId && r.type === "transport");
     const pair = reports.find(r => r.id === transport?.selectedCandidatePairId && r.type === "candidate-pair");
     return {
-        identity: JSON.stringify([sender.sessionId, outbound[0].peer.connectionId, outbound[0].report.id,
+        identity: JSON.stringify([sender.applicationBuildId ?? null, receiver.applicationBuildId ?? null,
+            sender.sessionId, outbound[0].peer.connectionId, outbound[0].report.id,
             receiver.sessionId, stream.peer.connectionId, stream.report.id, stream.report.ssrc]),
         receiverReport: stream.report,
         selectedPair: pair || null,

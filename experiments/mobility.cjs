@@ -38,7 +38,7 @@ async function waitPeers(page, target, timeoutMs) {
 
 (async () => {
     fs.mkdirSync(OUT_DIR, { recursive: true });
-    const browser = await chromium.launch({ headless: true, args: FAKE_MEDIA_ARGS });
+    const browser = await chromium.launch({ channel: "chrome", headless: true, args: FAKE_MEDIA_ARGS });
     const rec = { exportedAt: new Date().toISOString(), tiles: TILES, holdMs: HOLD_MS, phases: {} };
 
     try {

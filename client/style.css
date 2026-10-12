@@ -1,0 +1,8 @@
+:root { font-family: system-ui, sans-serif; color: #182b37; background: #f3f5f6; }
+body { margin: 0; } main { max-width: 650px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 1.7rem; } h2 { font-size: 1.1rem; margin-top: 24px; }
+p { line-height: 1.5; } section, form { padding: 16px; background: white; border: 1px solid #ccd5da; border-radius: 6px; margin: 14px 0; }
+label { display: block; margin: 10px 0; } input:not([type=checkbox]) { display: block; padding: 10px; max-width: 90%; font: inherit; border: 1px solid #8297a3; border-radius: 3px; }
+button { padding: 11px 14px; margin: 5px 5px 5px 0; font: inherit; border: 1px solid #17637d; border-radius: 4px; background: #17637d; color: white; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; } button:focus-visible, input:focus-visible { outline: 3px solid #e3ae4a; outline-offset: 2px; }
+#status { font-weight: 600; } #build,.note { font-size: .85rem; overflow-wrap: anywhere; } li { margin: 8px 0; }

@@ -40,7 +40,7 @@ const FAKE_SPEECH = FAKE_MEDIA_ARGS
     if (SCENARIO === "conv") ensureSpeechWav(SPEECH_WAV);
 
     const argsA = SCENARIO === "conv" ? FAKE_SPEECH : FAKE_MEDIA_ARGS;
-    const browser = await chromium.launch({ headless: true, args: argsA });
+    const browser = await chromium.launch({ channel: "chrome", headless: true, args: argsA });
     const kindCounts = {};
     const rec = { exportedAt: new Date().toISOString(), scenario: SCENARIO, clients: {}, kindCounts };
 
@@ -52,6 +52,9 @@ const FAKE_SPEECH = FAKE_MEDIA_ARGS
         await pB.goto(BASE, { waitUntil: "domcontentloaded" });
         await loginPage(pA, `sn${UID}a`, `snpass${UID}a`);
         await loginPage(pB, `sn${UID}b`, `snpass${UID}b`);
+        if (SCENARIO === "conv" && await pA.evaluate(() => !!window.proxExperiment)) {
+            throw new Error("conversation signalling requires the full game host; the minimal client does not implement speakTo/speakAccept");
+        }
         await pA.evaluate(() => window.wsnVoiceCtl.enable());
         await pB.evaluate(() => window.wsnVoiceCtl.enable());
         log(`scenario=${SCENARIO}, hold=${HOLD_MS / 1000} s`);

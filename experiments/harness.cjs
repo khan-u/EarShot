@@ -54,7 +54,7 @@ async function collect(page, user, uplinkKbps) {
 
 (async () => {
     fs.mkdirSync(OUT_DIR, { recursive: true });
-    const browser = await chromium.launch({ headless: true, args: FAKE_MEDIA_ARGS });
+    const browser = await chromium.launch({ channel: "chrome", headless: true, args: FAKE_MEDIA_ARGS });
     const clients = [];
 
     try {

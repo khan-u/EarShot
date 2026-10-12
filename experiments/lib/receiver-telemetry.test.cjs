@@ -25,6 +25,16 @@ test("matches forward SSRC and bounds remote stats without assuming symmetric si
     s.exchange.reply.snapshot.peers[0].reports[0].ssrc = 43;
     assert.throws(() => matchReceiver(s), /SSRC/);
 });
+test("rejects unequal or partially identified builds and tracks changes between samples", () => {
+    const a = sample(1000, 10), originalIdentity = a.match.identity;
+    a.exchange.sender.applicationBuildId = "new";
+    assert.throws(() => matchReceiver(a), /build mismatch/);
+    a.exchange.senderAfter.applicationBuildId = "new";
+    a.exchange.reply.snapshot.applicationBuildId = "old";
+    assert.throws(() => matchReceiver(a), /build mismatch/);
+    a.exchange.reply.snapshot.applicationBuildId = "new";
+    assert.notEqual(matchReceiver(a).identity, originalIdentity);
+});
 test("uses interval counters and the selected pair, with an explicit assumed device term", () => {
     const interval = receiverInterval(sample(1000, 10), sample(1500, 20), { startMs: 900, endMs: 1600 });
     assert.equal(interval.valid, true); assert.equal(interval.jitterBufferMs, 20);

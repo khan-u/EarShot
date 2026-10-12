@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "sourceRepository": "ts-client",
+  "sourceSnapshot": "0106096d9b4b0bb6e8f670f237b646622bd0d425",
+  "snapshotCommitTime": "2026-08-25T09:26:38-07:00",
+  "voiceCheckpoint": "cba46f32d775ce50e44264e3c0ac239f3731407a",
+  "earshotArtifact": "ea7d2c6a6d880a1c41d97e4ca533b17441202c93",
+  "confirmedDeployedBuild": null,
+  "status": "source candidate supported by checkout history; browser bundle identity is unrecorded",
+  "sourceFiles": {
+    "osrs/Game.ts": {
+      "sha256": "7f3091f79ec3a2e57c82ffdc1f069c9062110557e56b06ab1612a6dfd9d79989",
+      "gitBlob": "34a447cefb492863b77195ab35fea421f687a6a0"
+    },
+    "osrs/voice/VoiceRTC.ts": {
+      "sha256": "27ab63cae62821dc9b79d0e503c3a43569f85a11a7c584221a874a49b6e19d7f",
+      "gitBlob": "fa15cd600985fc652ceb11b0d12bd0ea1f6542d2"
+    },
+    "osrs/voice/VoiceMetrics.ts": {
+      "sha256": "de6bbcf8a853e68e49224c15877bab1764722c567129b9d6f458491c42eac1b4",
+      "gitBlob": "2ddd958760b561e541a4e6d1e74ae5b1f2ee2ec1"
+    },
+    "osrs/voice/SensorNode.ts": {
+      "sha256": "24bff6afee78706fb8f5f66f10ebaf5434c9c0f2c3a3cc9e814533b1ab329833",
+      "gitBlob": "6536d7970d9e4aa2ffeafa9b02d660227c8ae167"
+    }
+  },
+  "voiceMethodsWithMatchingErasedBodyTokens": [
+    "supported",
+    "get",
+    "dbg",
+    "getLocalStream",
+    "isMuted",
+    "ensurePeer",
+    "attachRemoteAudio",
+    "flushIce",
+    "isEnabled",
+    "peerCount",
+    "setSpeakHooks",
+    "isArmed",
+    "setArmed",
+    "micIconDataUrl"
+  ],
+  "voiceMethodsWithDifferentBodies": [
+    "init",
+    "ensureIce",
+    "setMuted",
+    "applyMuteState",
+    "createPeer",
+    "makeOffer",
+    "updateProximity",
+    "setPeerSending",
+    "onSignal",
+    "rxAudio",
+    "linkDebug",
+    "setEnabled",
+    "shutdown",
+    "closePeer",
+    "setSessionMembers",
+    "setSpeakingToken",
+    "startVad",
+    "stopVad",
+    "pollVad",
+    "tapMic",
+    "experimentEnable",
+    "meshSnapshot",
+    "buildUi",
+    "refreshUi",
+    "setVisible"
+  ],
+  "earlierCollection": {
+    "dates": [
+      "2026-08-11",
+      "2026-08-12"
+    ],
+    "lastRetainedCheckout": "838e0e2265d9bc450cba23b6fd7e319012030c42",
+    "limitation": "VoiceMetrics and SensorNode first appear in retained history on August 16; earlier working-tree contents and deployed bundles cannot be recovered from these commit dates."
+  }
+}

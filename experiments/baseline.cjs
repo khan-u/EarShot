@@ -50,7 +50,7 @@ function startSfu() {
     fs.mkdirSync(OUT_DIR, { recursive: true });
     log(`starting SFU on port ${PORT}`);
     const sfu     = await startSfu();
-    const browser = await chromium.launch({ headless: true, args: FAKE });
+    const browser = await chromium.launch({ channel: "chrome", headless: true, args: FAKE });
     const stat    = (pg) => pg.evaluate(() => window.baselineStats());
 
     try {

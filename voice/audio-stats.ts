@@ -4,6 +4,7 @@ export type StatsRecord = Record<string, string | number | boolean>;
 export interface AudioSnapshot {
     schemaVersion: 1;
     sessionId: string;
+    applicationBuildId?: string | null;
     timeOriginMs: number;
     startedAtMs: number;
     finishedAtMs: number;
@@ -30,12 +31,13 @@ export class AudioStatsProbe {
     private ids = new WeakMap<RTCPeerConnection, string>();
     private nextId = 0;
     readonly sessionId = crypto.randomUUID();
+    applicationBuildId: string | null = null;
     constructor(private timeoutMs = 2000) {}
 
     async snapshot(peers: StatsPeer[]): Promise<AudioSnapshot> {
         const now = () => performance.timeOrigin + performance.now();
         const snapshot: AudioSnapshot = {
-            schemaVersion: 1, sessionId: this.sessionId, timeOriginMs: performance.timeOrigin,
+            schemaVersion: 1, sessionId: this.sessionId, applicationBuildId: this.applicationBuildId, timeOriginMs: performance.timeOrigin,
             startedAtMs: now(), finishedAtMs: 0,
             visibility: typeof document === "undefined" ? "unknown" : document.visibilityState,
             peers: [],

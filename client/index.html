@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PROX-VOICE experiment</title><link rel="stylesheet" href="/style.css"></head>
+<body><main>
+<h1>PROX-VOICE experiment</h1>
+<p>Open the same room on both devices. Keep both pages visible during a capture.</p>
+<form id="join"><label>Participant name<input id="name" maxlength="32" value="MacBook" required></label>
+<label>Room<input id="room" maxlength="48" value="earshot" pattern="[A-Za-z0-9_-]+" required></label>
+<button id="join-button">Join room</button></form>
+<section aria-label="Audio controls"><button id="voice" disabled>Enable voice</button>
+<button id="play" disabled>Resume received audio</button><button id="leave" disabled>Leave room</button>
+<label><input type="checkbox" id="measurement">Share receiver measurements with room peers</label>
+<label>Grace window (ms)<input id="grace" type="number" min="0" max="60000" value="0"></label>
+<label><input id="dtx" type="checkbox">Request Opus DTX (set before enabling voice)</label></section>
+<section aria-label="Movement"><h2>Position</h2><p id="position">Not connected</p>
+<button id="out" disabled>Move 25 tiles west</button><button id="back" disabled>Return 25 tiles east</button></section>
+<h2>Room participants</h2><ul id="participants"></ul>
+<p id="connection"></p><p id="status" role="status">Ready to join.</p><p id="build"></p>
+<p class="note">This client removes the game workload. Its measurements require separate validation before comparison with the pilot.</p>
+</main><script type="module" src="/client.js"></script></body></html>

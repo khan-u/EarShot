@@ -56,8 +56,8 @@ if (!["tone", "speech"].includes(SOURCE)) throw new Error("source must be tone o
     };
 
     const dtxUrl = new URL(BASE); dtxUrl.searchParams.set("wsndtx", DTX ? "1" : "0");
-    const senderBrowser   = await chromium.launch({ headless: !process.env.HEADED, args: audioArgs(SOURCE) });
-    const listenerBrowser = await chromium.launch({ headless: !process.env.HEADED, args: FAKE_MEDIA_ARGS });
+    const senderBrowser   = await chromium.launch({ channel: "chrome", headless: !process.env.HEADED, args: audioArgs(SOURCE) });
+    const listenerBrowser = await chromium.launch({ channel: "chrome", headless: !process.env.HEADED, args: FAKE_MEDIA_ARGS });
 
     try {
         const ctxA = await bootContext(senderBrowser,   BASE, { stripProcessing: true });

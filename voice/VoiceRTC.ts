@@ -124,7 +124,7 @@ export class VoiceRTC {
             !!navigator.mediaDevices.getUserMedia;
     }
 
-    static init(sendSignal: RtcSignalSender): VoiceRTC | null {
+    static init(sendSignal: RtcSignalSender, options: { showUi?: boolean; applicationBuildId?: string } = {}): VoiceRTC | null {
         if (VoiceRTC.instance) { VoiceRTC.instance.sendSignal = sendSignal; return VoiceRTC.instance; }
         if (!VoiceRTC.supported()) {
             const insecure = typeof window !== "undefined" && (window as any).isSecureContext === false;
@@ -134,6 +134,7 @@ export class VoiceRTC {
         }
         const rtc = new VoiceRTC(sendSignal);
         VoiceRTC.instance = rtc;
+        rtc.audioProbe.applicationBuildId = options.applicationBuildId ?? null;
         void VoiceRTC.ensureIce();   // warm the TURN credentials before the first neighbour
 
         // Instrumentation is duty-cycled with the mesh and reads only getStats /
@@ -149,6 +150,7 @@ export class VoiceRTC {
                 enabled: () => rtc.isEnabled(),
                 peers: () => rtc.peerCount(),
                 peerIndices: () => [...rtc.peers.keys()],
+                connectionSummary: () => rtc.meshSnapshot(),
                 setGrace: (ms: number) => { rtc.graceMs = Math.max(0, ms | 0); },
                 grace: () => rtc.graceMs,
                 setDtx: (on: boolean) => { rtc.dtxOn = !!on; },
@@ -162,7 +164,9 @@ export class VoiceRTC {
                 linkDebug: () => rtc.linkDebug(),
             };
         }
-        try { rtc.buildUi(); } catch (e) { console.error("[rtc] buildUi failed", e); }
+        if (options.showUi !== false) {
+            try { rtc.buildUi(); } catch (e) { console.error("[rtc] buildUi failed", e); }
+        }
         rtc.dbg("init (nonce=" + rtc.nonce + ", voice OFF by default)");
         return rtc;
     }

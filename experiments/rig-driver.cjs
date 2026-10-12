@@ -13,14 +13,14 @@
  *   default INPUT  = "MacBook Pro Microphone"    -> Device A getUserMedia
  *   ffmpeg records the UCA202 explicitly by avfoundation index (default 1).
  *
- * Like the other experiments/ harnesses, this requires a ts-client checkout,
- * which is not part of this repository. This revised driver saves raw results
+ * Serve the minimal client in this repository, or supply an external game host
+ * with the revised controller. This driver saves raw results
  * separately from the historical pilot artifacts. The analysis chain is reproducible standalone: rig/
  * (stimulus, analyze, self-test) plus the archived captures in data/ re-derive
  * the per-capture latency summaries via compare-rig-runs.sh.
  *
  * Usage:
- *   TS_CLIENT=<ts-client checkout> node rig-driver.cjs --dry
+ *   node experiments/rig-driver.cjs --dry
  *       # validate: launch A, login, enable voice, reach the peer-wait gate. No
  *       # audio switching, no capture. Safe to run without the phone/wiring.
  *   node rig-driver.cjs [--secs N] [--bursts N] [--amp 0.7] [--audio-index 1] [--no-restore]
@@ -34,8 +34,7 @@ const { stimulusArgs, analyzeCapture } = require("./lib/rig-analysis.cjs");
 const { sampleReceiver, receiverInterval, startTelemetry, summarizeTelemetry, epochMs } = require("./lib/receiver-telemetry.cjs");
 
 // ── config ──────────────────────────────────────────────────────────────────
-const TS_CLIENT = process.env.TS_CLIENT;
-if (!TS_CLIENT) { console.error("set TS_CLIENT=<path to the ts-client checkout> (playwright-core + chromium come from its node_modules)"); process.exit(1); }
+const TS_CLIENT = process.env.TS_CLIENT || path.resolve(__dirname, "..");
 const BASE = process.env.BASE_URL || "http://localhost:5001";
 const RIG = process.env.RIG_DIR || path.join(__dirname, "..", "rig");
 const DATA = process.env.RIG_DATA_DIR || path.join(__dirname, "runs");
@@ -149,6 +148,11 @@ const snap = (page) => page.evaluate(async () => {
 });
 
 async function loginA(page) {
+    if (await page.evaluate(() => typeof window.proxExperiment?.join === "function")) {
+        await page.evaluate(name => window.proxExperiment.join(name), USER);
+        log("joined the experimental room");
+        return;
+    }
     log("waiting for login screen…");
     await page.waitForFunction(() => {
         const b = [...document.querySelectorAll("button")].find((x) => /login/i.test(x.textContent || ""));
@@ -225,9 +229,28 @@ async function capture(page, runIdx) {
         await sleep(500);
         const second = await sampleReceiver(page, manifest.captureId);
         writeTelemetry(second);
+        manifest.loadedClientBuilds = {
+            sender: second.exchange?.sender?.applicationBuildId || null,
+            receiver: second.exchange?.reply?.snapshot?.applicationBuildId || null,
+            source: "self-reported identifiers embedded in the experimental browser build",
+        };
         const preflight = receiverInterval(first, second);
         manifest.receiverTelemetry.preflight = preflight;
         if (!preflight.valid) throw new Error("receiver telemetry preflight failed: " + preflight.invalidReason);
+        const clientBuild = await page.evaluate(async () => {
+            if (!window.proxExperiment) return null;
+            const response = await fetch("/build.json", { cache: "no-store" });
+            if (!response.ok) throw new Error("client build manifest unavailable");
+            const build = await response.json();
+            if (build.buildId !== window.proxExperiment.build.buildId) throw new Error("loaded client and served build differ");
+            return build;
+        });
+        if (clientBuild) {
+            if (clientBuild.buildId !== manifest.loadedClientBuilds.sender || clientBuild.buildId !== manifest.loadedClientBuilds.receiver)
+                throw new Error("capture endpoints do not match the served client build");
+            fs.writeFileSync(path.join(directory, "client-build.json"), JSON.stringify(clientBuild, null, 2) + "\n");
+            manifest.loadedClientBuilds.manifestFile = "client-build.json";
+        }
         monitor = startTelemetry(page, manifest.captureId, writeTelemetry);
         monitor.samples.push(first, second);
         manifest.stimulusArguments = stimulusArgs(BURSTS, AMPLITUDE, "stimulus.wav");
@@ -328,6 +351,7 @@ async function capture(page, runIdx) {
     // paid once, not per run — and never during the capture window.
     const PROFILE_DIR = path.join(__dirname, ".rig-profile");
     const ctx = await chromium.launchPersistentContext(PROFILE_DIR, {
+        channel: "chrome",
         headless: false,
         viewport: { width: 390, height: 844 },
         args: ["--autoplay-policy=no-user-gesture-required", "--use-angle=metal", "--enable-gpu"],
