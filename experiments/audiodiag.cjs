@@ -17,21 +17,8 @@ const BASE = process.env.BASE_URL || "http://127.0.0.1:5001";
 // side and then peer with corpses instead of each other.
 const UID  = Date.now().toString(36).slice(-6);
 
-const snap = (page) => page.evaluate(async () => {
-    let pkts = 0, samples = 0, level = 0;
-    const pcs = window.wsnVoiceCtl._pcs ? [...window.wsnVoiceCtl._pcs.values()] : [];
-    for (const pc of pcs) {
-        const s = await pc.getStats();
-        s.forEach((r) => {
-            if (r.type === "inbound-rtp" && r.kind === "audio") {
-                pkts    += r.packetsReceived || 0;
-                samples += r.jitterBufferEmittedCount || 0;
-                level    = Math.max(level, r.audioLevel || 0);
-            }
-        });
-    }
-    return { peers: window.wsnVoiceCtl.peers(), pkts, samples, level };
-});
+const { readAudioStats } = require("./lib/audio-probes.cjs");
+const snap = page => page.evaluate(readAudioStats);
 
 (async () => {
     const browser = await chromium.launch({ headless: !process.env.HEADED, args: FAKE_MEDIA_ARGS });
@@ -50,7 +37,7 @@ const snap = (page) => page.evaluate(async () => {
         for (let t = 0; t < 45; t += 3) {
             await sleep(3000);
             const [sa, sb] = await Promise.all([snap(pA), snap(pB)]);
-            log(`+${t + 3}s  A[peers=${sa.peers} rxSamp=${sa.samples} pkts=${sa.pkts} lvl=${sa.level.toFixed(3)}]  B[peers=${sb.peers} rxSamp=${sb.samples} pkts=${sb.pkts} lvl=${sb.level.toFixed(3)}]`);
+            log(JSON.stringify({ elapsedSec: t + 3, sender: sa, receiver: sb }));
         }
-    } catch (e) { log("ERR", String(e).slice(0, 200)); } finally { await browser.close(); }
+    } catch (e) { process.exitCode = 1; log("ERR", String(e).slice(0, 200)); } finally { await browser.close(); }
 })();

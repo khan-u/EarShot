@@ -4,7 +4,7 @@
  * Boots N headless Chromium peers, forms the voice mesh, holds for HOLD_MS,
  * then reads each client's KPIs (formation latency, ICE success, relay%,
  * RTT, glare), uplink bandwidth, and sensor stats. Writes per-client JSON
- * and an aggregate summary to experiments/data/.
+ * and an aggregate summary to experiments/runs/.
  *
  * Usage:  node harness.cjs <N> [holdSec]    (defaults: 2, 40)
  */
@@ -17,7 +17,7 @@ const BASE    = process.env.BASE_URL || "http://127.0.0.1:5001";
 const N       = Math.max(1, parseInt(process.argv[2] || "2", 10));
 const HOLD_MS = Math.max(5, parseInt(process.argv[3] || "40", 10)) * 1000;
 const STAMP   = new Date().toISOString().replace(/[:.]/g, "-");
-const OUT_DIR = path.join(__dirname, "data");
+const OUT_DIR = process.env.EXPERIMENT_DATA_DIR || path.join(__dirname, "runs");
 const UID     = Date.now().toString(36).slice(-6);
 
 async function bootClient(browser, i) {
@@ -27,20 +27,8 @@ async function bootClient(browser, i) {
     return { page, ctx, user: `hv${UID}${i}`, pass: `hvpass${UID}${i}` };
 }
 
-// Sample outbound-rtp bytesSent for all active peer connections.
-const snapUplink = (page) => page.evaluate(async () => {
-    let bytes = 0, ts = 0;
-    const pcs = window.wsnVoiceCtl._pcs ? [...window.wsnVoiceCtl._pcs.values()] : [];
-    for (const pc of pcs) {
-        const s = await pc.getStats();
-        s.forEach((r) => {
-            if (r.type === "outbound-rtp" && r.kind === "audio") {
-                bytes += r.bytesSent || 0; ts = r.timestamp || 0;
-            }
-        });
-    }
-    return { bytes, ts };
-});
+const { readAudioStats, uplinkRate } = require("./lib/audio-probes.cjs");
+const snapUplink = page => page.evaluate(readAudioStats);
 
 async function collect(page, user, uplinkKbps) {
     const rec = await page.evaluate(async (u) => {
@@ -83,30 +71,28 @@ async function collect(page, user, uplinkKbps) {
         await sleep(HOLD_MS);
 
         // Uplink: before/after 5-s window for each client.
-        const snaps0 = await Promise.all(clients.map((c) => snapUplink(c.page).catch(() => null)));
+        const snaps0 = await Promise.all(clients.map((c) => snapUplink(c.page)));
         await sleep(5000);
-        const snaps1 = await Promise.all(clients.map((c) => snapUplink(c.page).catch(() => null)));
-        const uplinkKbps = clients.map((_, i) => {
-            const s0 = snaps0[i], s1 = snaps1[i];
-            if (!s0 || !s1) return null;
-            const dt = (s1.ts - s0.ts) / 1000;
-            return dt > 0 ? Math.round((s1.bytes - s0.bytes) * 8 / dt / 1000) : null;
-        });
+        const snaps1 = await Promise.all(clients.map((c) => snapUplink(c.page)));
+        const rates = clients.map((_, i) => uplinkRate(snaps0[i], snaps1[i]));
+        const uplinkKbps = rates.map(rate => rate.kbps);
 
         const perClient = [];
         for (let i = 0; i < clients.length; i++) {
             const c = clients[i];
             try {
                 const rec  = await collect(c.page, c.user, uplinkKbps[i]);
+                Object.assign(rec, { schemaVersion: 3, uplink: rates[i], statsBefore: snaps0[i], statsAfter: snaps1[i] });
+                if (!rates[i].valid) process.exitCode = 1;
                 perClient.push(rec);
-                const file = path.join(OUT_DIR, `wsn-client-${c.user}-${STAMP}.json`);
+                const file = path.join(OUT_DIR, `wsn-client-identified-${c.user}-${STAMP}.json`);
                 fs.writeFileSync(file, JSON.stringify(rec, null, 1));
                 log(`wrote ${path.basename(file)}`);
-            } catch (e) { log(`collect error (${c.user}):`, String(e).slice(0, 120)); }
+            } catch (e) { process.exitCode = 1; log(`collect error (${c.user}):`, String(e).slice(0, 120)); }
         }
 
-        const summary = { exportedAt: new Date().toISOString(), N, perClient };
-        const sumFile = path.join(OUT_DIR, `wsn-voice-N${N}-summary-${STAMP}.json`);
+        const summary = { schemaVersion: 3, exportedAt: new Date().toISOString(), N, perClient };
+        const sumFile = path.join(OUT_DIR, `wsn-voice-identified-N${N}-summary-${STAMP}.json`);
         fs.writeFileSync(sumFile, JSON.stringify(summary, null, 1));
         log(`wrote summary → ${path.basename(sumFile)}`);
     } finally {

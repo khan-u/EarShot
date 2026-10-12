@@ -22,6 +22,7 @@ import { VoiceMetrics } from "./VoiceMetrics";
 import { SensorNode } from "./SensorNode";
 import { shouldIgnoreOffer } from "./glare";
 import { mungeDtx } from "./sdp";
+import { AudioStatsProbe } from "./audio-stats";
 import { VadState, newVadState, rmsFromBytes, stepVad, VAD_POLL_MS } from "./vad";
 
 /** Sends one signalling blob to a target player via the server gateway. */
@@ -46,6 +47,7 @@ export class VoiceRTC {
     private static instance: VoiceRTC | null = null;
 
     private sendSignal: RtcSignalSender;
+    private audioProbe = new AudioStatsProbe();
     private nonce: number;               // our perfect-negotiation tie-break
     private peers: Map<number, Peer> = new Map();
     private enabled = false;             // proximity voice is off until turned on
@@ -143,6 +145,7 @@ export class VoiceRTC {
                 dtx: () => rtc.dtxOn,
                 audioLatency: () => measureAudioLatency(),
                 rxAudio: () => rtc.rxAudio(),
+                audioStats: () => rtc.audioProbe.snapshot([...rtc.peers.values()]),
                 linkDebug: () => rtc.linkDebug(),
             };
         }

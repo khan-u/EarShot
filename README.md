@@ -28,7 +28,7 @@ experiments/
 docs/figures/          Architecture and reproducible pilot figures
 ```
 
-Other harnesses cover formation (`harness.cjs`), mobility, grace windows, DTX, sensing, and failure diagnostics. Some require controller adapters beyond the shipped public API; see **Live experiments** below.
+Other harnesses cover formation (`harness.cjs`), mobility, grace windows, DTX, sensing, and failure diagnostics. They use the read-only controller probes described under **Live experiments** below.
 
 ## Pilot result and measurement boundary
 
@@ -122,9 +122,10 @@ Live game experiments need the external browser client, game server, its runtime
 |---|---|
 | `wsnGame.loggedIn()`, `pos()`, `teleport()` | Login and controlled movement |
 | `wsnVoice.kpis()` | Retained per-link KPI summary |
-| `wsnVoiceCtl.rxAudio()` | Aggregate inbound packet/sample counters and audio level |
+| `wsnVoiceCtl.audioStats()` | Identified audio streams, counters, timestamps and selected ICE-pair joins |
+| `wsnVoiceCtl.rxAudio()` | Legacy aggregate diagnostic; new experiments use identified stats |
 | `wsnVoiceCtl.peers()`, `peerIndices()`, `linkDebug()` | Peer and connection diagnostics |
-| `wsnVoiceCtl.grace?.()` | Grace-window setting |
+| `wsnVoiceCtl.setGrace(ms)`, `grace()` | Apply and verify the grace window on both endpoints |
 | `wsnSense.stats()`, `links`, `kindCounts?.()` | Sensing diagnostics supplied by the host |
 | `wsnEnergy.total()` | Virtual energy debit supplied by the host |
 
@@ -139,9 +140,11 @@ node experiments/audiogap.cjs 9
 
 The rig saves separate per-run stimulus/WAV/raw CSV/log/manifest bundles under `experiments/runs/` (override with `RIG_DATA_DIR`). It records the repository commit, dirty status, and an optional operator-supplied `APP_BUILD_ID`. That identifier must be obtained from the deployed application; it is not discovered or verified by the driver. The sender KPI remains a separately labelled diagnostic.
 
-The revised gap harness uses `rxAudio()`, monotonic timestamps and serial nominal 200 ms polling. It records observed packet-stop and recovery times, poll intervals and counter resets. The 1200 ms stall threshold confirms a stop; it is not added to the stop-time estimate. Total packet interruption is recovery time minus stop time, including the absence. These observations are polling proxies, subject to stats refresh and counter-identity limitations, and cannot establish listener-perceived silence. Output is `wsn-packetgap-v2-*.json` in `experiments/runs/` (override with `EXPERIMENT_DATA_DIR`). Here, `v2` and `schemaVersion: 2` identify the revised measurement record format, not a PROX-VOICE release. The marker separates records with corrected timing fields from the older archived format.
+The gap and grace harnesses now use `audioStats()`, monotonic host timestamps and serial nominal 200 ms polling. Grace is applied and checked at both endpoints. Movement uses relative tile deltas and checks the outward and return positions. A packet increment is accepted only across observations of the same browser session, peer connection and RTP stream. A new or reset counter must advance on a subsequent poll; its lifetime count alone is not recovery evidence. The 1200 ms threshold confirms a stop and is not added to its onset estimate. Total packet interruption includes the absence. These are polling proxies, subject to browser stats refresh and command timing, and cannot establish audible silence.
 
-**Known integration work:** `harness.cjs`, `gracegap.cjs`, `dtxtest.cjs`, `wedgetest.cjs` and `audiodiag.cjs` still access `wsnVoiceCtl._pcs`, which the shipped controller does not expose. Their fallback can silently produce zero counters. Adapt and verify these probes before collecting new results; the grace harness also retains the legacy stop detector. Other game harnesses depend on external movement/sensing/UI hooks. The revised live rig and packet-gap workflows have automated helper checks but require a new live application/hardware run before use as a validated collection protocol.
+New formation, DTX and gap records use `schemaVersion: 3` and `identified` filenames under `experiments/runs/` (override with `EXPERIMENT_DATA_DIR`). They retain raw stats and invalid reasons. Bandwidth uses per-stream byte and timestamp differences and becomes unavailable after stream changes, counter resets or missing reports. A grace absence rate spans the baseline and final absence snapshots, with their command/probe uncertainty; a closed connection makes that whole-window rate unavailable. Peer retention means presence at every sampled poll, not proof of uninterrupted connectivity. Historical aggregation remains separate.
+
+**Live integration still required:** the revised controller must be built into the external application before running these harnesses. Missing APIs and failed probes are errors. Game movement, sensing and UI hooks still come from that host application. Automated helper checks do not replace an application smoke test or a physical rig validation run.
 
 The standalone SFU in `experiments/baseline/` forwards RTP; it does not decode and mix audio. Install its dependencies with `npm install --prefix experiments/baseline` before running `node experiments/baseline.cjs`. Its candidate-pair RTT output is a network proxy, not measured end-to-end audio delay. Historical names such as `serverMixedOneWayMs` should not be interpreted as evidence of mixing or validated one-way timing.
 

@@ -15,14 +15,14 @@ class PacketGap {
         this.stopMs = this.stopConfirmedMs = this.resumeMs = null;
         this.samples = [{ timeMs, packets, reset: false }];
     }
-    observe(timeMs, packets) {
+    observe(timeMs, packets, evidence = null) {
         const previous = this.samples.at(-1);
         if (!Number.isFinite(timeMs) || timeMs < previous.timeMs || !Number.isFinite(packets) || packets < 0) throw new Error("invalid packet observation");
-        const reset = packets < previous.packets;
+        const reset = evidence ? evidence.resets > 0 : packets < previous.packets;
         // A removed/replaced peer resets the aggregate counter. Zero is not
         // packet progress; a new positive count is evidence of reception.
-        const progress = packets > previous.packets || (reset && packets > 0);
-        this.samples.push({ timeMs, packets, reset });
+        const progress = evidence ? evidence.progress : packets > previous.packets || (reset && packets > 0);
+        this.samples.push({ timeMs, packets, reset, evidence });
         if (progress) {
             this.lastProgressMs = timeMs;
             if (this.stopMs != null && this.resumeMs == null) this.resumeMs = timeMs;

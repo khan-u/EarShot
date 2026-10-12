@@ -25,21 +25,8 @@ const FAKE_TONE = FAKE_MEDIA_ARGS
     .filter((f) => !f.startsWith("--use-file-for-fake-audio-capture"))
     .concat([`--use-file-for-fake-audio-capture=${TONE_WAV}`]);
 
-const rx    = (page) => page.evaluate(async () => {
-    let pkts = 0, samples = 0, level = 0;
-    const pcs = window.wsnVoiceCtl._pcs ? [...window.wsnVoiceCtl._pcs.values()] : [];
-    for (const pc of pcs) {
-        const s = await pc.getStats();
-        s.forEach((r) => {
-            if (r.type === "inbound-rtp" && r.kind === "audio") {
-                pkts    += r.packetsReceived || 0;
-                samples += r.jitterBufferEmittedCount || 0;
-                level    = Math.max(level, r.audioLevel || 0);
-            }
-        });
-    }
-    return { pkts, samples, level };
-});
+const { readAudioStats, waitForFlow, packetProgress } = require("./lib/audio-probes.cjs");
+const rx = page => page.evaluate(readAudioStats);
 const peers = (page) => page.evaluate(() => window.wsnVoiceCtl.peers());
 const pos   = (page) => page.evaluate(() => window.wsnGame ? window.wsnGame.pos() : null);
 
@@ -64,39 +51,24 @@ const pos   = (page) => page.evaluate(() => window.wsnGame ? window.wsnGame.pos(
         if (pA0 && pB0) { await pA.evaluate((d) => window.wsnGame.teleport(d.x, d.y), { x: pB0.x - pA0.x, y: pB0.y - pA0.y }); }
         log(`co-located @${pB0?.x},${pB0?.y}`);
 
-        // Wait for flowing packets (with one voice-kick retry like audiogap).
-        let flowing = false;
-        for (let attempt = 1; attempt <= 3 && !flowing; attempt++) {
-            let prev = (await rx(pB)).pkts;
-            for (let t = 0; t < 15000; t += 1000) {
-                await sleep(1000);
-                const cur = (await rx(pB)).pkts;
-                if (cur > prev + 20) { flowing = true; break; }
-                prev = cur;
-            }
-            if (!flowing && attempt < 3) {
-                await pA.evaluate(() => window.wsnVoiceCtl.disable()); await sleep(700);
-                await pA.evaluate(() => window.wsnVoiceCtl.enable());
-                log("  kicked A voice");
-            }
-        }
-        if (!flowing) { throw new Error("no baseline audio — abort"); }
+        await waitForFlow(pB);
         log("baseline audio flowing");
 
         await pA.evaluate((d) => window.wsnGame.teleport(d, 0), EAST);
         log(`A out +${EAST} EAST  A@`, JSON.stringify(await pos(pA)));
         await sleep(9000);
+        let previous = await rx(pB);
+        const tBack = performance.now();
         await pA.evaluate((d) => window.wsnGame.teleport(-d, 0), EAST);
-        const tBack = Date.now();
         log("A back  A@", JSON.stringify(await pos(pA)));
 
         // Watch 40s: does the peer re-form AND do packets flow?
-        let resumedAt = -1, lastPkts = -1;
+        let resumedAt = -1;
         for (let i = 0; i < 400; i++) {
             const r = await rx(pB);
-            if (r.pkts > 0 && r.pkts !== lastPkts && lastPkts !== -1 && resumedAt < 0) { resumedAt = Date.now() - tBack; }
-            lastPkts = r.pkts;
-            if (i % 20 === 0) { log(`  +${((Date.now() - tBack) / 1000).toFixed(1)}s  B.peers=${await peers(pB)} pkts=${r.pkts}`); }
+            if (packetProgress(previous, r).progress && resumedAt < 0) resumedAt = performance.now() - tBack;
+            previous = r;
+            if (i % 20 === 0) { log(`  +${((performance.now() - tBack) / 1000).toFixed(1)}s  B.peers=${await peers(pB)} streams=${r.peers.length}`); }
             if (resumedAt > 0) { break; }
             await sleep(100);
         }

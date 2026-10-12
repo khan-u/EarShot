@@ -22,7 +22,7 @@ const SOURCE     = (process.argv[2] || "tone").toLowerCase();
 const DTX        = parseInt(process.argv[3] || "0", 10) !== 0;
 const HOLD_MS    = Math.max(5, parseInt(process.argv[4] || "20", 10)) * 1000;
 const STAMP      = new Date().toISOString().replace(/[:.]/g, "-");
-const OUT_DIR    = path.join(__dirname, "data");
+const OUT_DIR    = process.env.EXPERIMENT_DATA_DIR || path.join(__dirname, "runs");
 const ASSETS_DIR = path.join(__dirname, "assets");
 const UID        = Date.now().toString(36).slice(-6);
 
@@ -36,15 +36,9 @@ function audioArgs(source) {
         .concat([`--use-file-for-fake-audio-capture=${wav}`]);
 }
 
-const snapBytes = (page) => page.evaluate(async () => {
-    let b = 0, ts = 0;
-    const pcs = window.wsnVoiceCtl._pcs ? [...window.wsnVoiceCtl._pcs.values()] : [];
-    for (const pc of pcs) {
-        const s = await pc.getStats();
-        s.forEach((r) => { if (r.type === "outbound-rtp" && r.kind === "audio") { b += r.bytesSent || 0; ts = r.timestamp || 0; } });
-    }
-    return { b, ts };
-});
+const { readAudioStats, uplinkRate, waitForFlow, packetProgress } = require("./lib/audio-probes.cjs");
+const snapBytes = page => page.evaluate(readAudioStats);
+if (!["tone", "speech"].includes(SOURCE)) throw new Error("source must be tone or speech");
 
 (async () => {
     fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -53,6 +47,7 @@ const snapBytes = (page) => page.evaluate(async () => {
     ensureSpeechWav(SPEECH_WAV);
 
     const rec = {
+        schemaVersion: 3, valid: false, invalidReason: null,
         exportedAt: new Date().toISOString(),
         source: SOURCE,
         dtx: DTX,
@@ -60,7 +55,7 @@ const snapBytes = (page) => page.evaluate(async () => {
         uplinkKbps: null,
     };
 
-    const dtxUrl    = `${BASE}?wsndtx=${DTX ? 1 : 0}`;
+    const dtxUrl = new URL(BASE); dtxUrl.searchParams.set("wsndtx", DTX ? "1" : "0");
     const senderBrowser   = await chromium.launch({ headless: !process.env.HEADED, args: audioArgs(SOURCE) });
     const listenerBrowser = await chromium.launch({ headless: !process.env.HEADED, args: FAKE_MEDIA_ARGS });
 
@@ -68,35 +63,41 @@ const snapBytes = (page) => page.evaluate(async () => {
         const ctxA = await bootContext(senderBrowser,   BASE, { stripProcessing: true });
         const ctxB = await bootContext(listenerBrowser, BASE);
         const pA = await ctxA.newPage(), pB = await ctxB.newPage();
-        await pA.goto(dtxUrl, { waitUntil: "domcontentloaded" });
-        await pB.goto(BASE,   { waitUntil: "domcontentloaded" });
+        await pA.goto(dtxUrl.href, { waitUntil: "domcontentloaded" });
+        await pB.goto(dtxUrl.href,   { waitUntil: "domcontentloaded" });
         await loginPage(pA, `dx${UID}a`, `dxpass${UID}a`);
         await loginPage(pB, `dx${UID}b`, `dxpass${UID}b`);
         await pA.evaluate(() => window.wsnVoiceCtl.enable());
         await pB.evaluate(() => window.wsnVoiceCtl.enable());
         log(`source=${SOURCE} dtx=${DTX} — waiting for peer link`);
 
-        // Wait for B to see A as a peer.
-        for (let t = 0; t < 20000; t += 500) {
-            if (await pB.evaluate(() => window.wsnVoiceCtl.peers()) >= 1) break;
-            await sleep(500);
+        for (const page of [pA, pB]) {
+            if (await page.evaluate(() => window.wsnVoiceCtl.dtx()) !== DTX) throw new Error("DTX setting mismatch");
         }
+        await waitForFlow(pB);
 
         log(`hold ${HOLD_MS / 1000} s, sampling uplink`);
         const snap0 = await snapBytes(pA);
+        rec.receiverBefore = await pB.evaluate(readAudioStats);
         await sleep(HOLD_MS);
         const snap1 = await snapBytes(pA);
+        rec.receiverAfter = await pB.evaluate(readAudioStats);
+        if (!packetProgress(rec.receiverBefore, rec.receiverAfter).progress) throw new Error("receiver stream did not advance across the hold window");
 
-        if (snap1.ts > snap0.ts) {
-            const dt = (snap1.ts - snap0.ts) / 1000;
-            rec.uplinkKbps = dt > 0 ? Math.round((snap1.b - snap0.b) * 8 / dt / 1000) : null;
-        }
+        rec.statsBefore = snap0; rec.statsAfter = snap1;
+        rec.uplink = uplinkRate(snap0, snap1);
+        rec.uplinkKbps = rec.uplink.kbps;
+        rec.valid = rec.uplink.valid; rec.invalidReason = rec.uplink.invalidReason;
+        // The setting is a requested SDP policy. Inspect the recorded codec
+        // parameters and received progress before interpreting DTX effectiveness.
 
         log(`uplinkKbps=${rec.uplinkKbps}`);
-        const file = path.join(OUT_DIR, `wsn-dtx-${SOURCE}-dtx${DTX ? 1 : 0}-${STAMP}.json`);
-        fs.writeFileSync(file, JSON.stringify(rec, null, 1));
+    } catch (error) { rec.valid = false; rec.invalidReason = error.message; }
+    finally {
+        const file = path.join(OUT_DIR, `wsn-dtx-identified-${SOURCE}-dtx${DTX ? 1 : 0}-${STAMP}.json`);
+        fs.writeFileSync(file, JSON.stringify(rec, null, 2) + "\n");
+        if (!rec.valid) { log(rec.invalidReason); process.exitCode = 1; }
         log(`wrote ${path.basename(file)}`);
-    } finally {
         await senderBrowser.close();
         await listenerBrowser.close();
     }
