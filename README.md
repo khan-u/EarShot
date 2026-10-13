@@ -338,6 +338,7 @@ Numerical reproduction is available. Physical timing accuracy and generalized en
 
   - Candidate-pair RTT is a network proxy, not measured end-to-end audio delay.
   - The field name `serverMixedOneWayMs` does not establish mixing or validated one-way timing.
+  - The forwarder uses one outbound track per recipient. Multi-sender stream handling and playout need separate validation before it can serve as a multi-party audio baseline.
 
 ## Repository layout
 
@@ -356,11 +357,16 @@ experiments/
   aggregate.py           Print historical telemetry summaries with existing filters
   baseline/              RTP-forwarding SFU comparison (werift + ws; no audio mixing)
   data/                  134 historical JSON/JSONL files and five WAV/CSV capture sets
-  runs/                  New rig/packet-gap outputs (generated, ignored by Git)
+  runs/                  New experiment outputs (generated, ignored by Git)
 docs/figures/            Architecture and reproducible pilot figures
 ```
 
-Other harnesses cover formation (`harness.cjs`), mobility, grace windows, DTX, sensing, and failure diagnostics. Their read-only controller probes are listed under [supported host and interfaces](#supported-host-and-interfaces).
+Other harnesses cover formation (`harness.cjs`), mobility, grace windows, DTX, sensing and failure diagnostics.
+
+- **Outputs:** new mobility, sensing and SFU results also default to `experiments/runs/` (override with `EXPERIMENT_DATA_DIR`), separate from historical aggregation.
+- **Sensing:** counts come from the retained `wsnSense.dump()` reports, which are saved with each result. They are not lifetime event totals.
+- **Mobility:** timings describe peer-object presence, not verified ICE connection or audio recovery.
+- **Interfaces:** see the [supported host and interfaces](#supported-host-and-interfaces) reference.
 
 ## License
 

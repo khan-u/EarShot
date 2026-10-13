@@ -68,10 +68,10 @@ export class VoiceRTC {
     // an inbound offer share one promise and exactly one connection is created.
     private ensuring: Map<number, Promise<Peer | null>> = new Map();
 
-    // STUN discovers each node's server-reflexive candidate; TURN is the
-    // multi-hop store-and-forward fallback for symmetric-NAT pairs. The live
-    // config (short-lived TURN creds) is fetched once from /api/turn, so the
-    // secret token never ships in the client and any failure keeps STUN.
+    // STUN helps discover server-reflexive candidates; TURN relays media when
+    // needed. Fetch the runtime ICE configuration from /api/turn once. TURN
+    // credentials are available to the browser, rather than embedded in the
+    // source. Relay-only policy remains enforced if configuration retrieval fails.
     private static ICE: RTCConfiguration = {
         iceServers: [
             { urls: "stun:stun.l.google.com:19302" },
@@ -113,8 +113,8 @@ export class VoiceRTC {
         rtc.audioProbe.applicationBuildId = options.applicationBuildId ?? null;
         void VoiceRTC.ensureIce();   // warm the TURN credentials before the first neighbour
 
-        // Instrumentation is duty-cycled with the mesh and reads only getStats /
-        // lifecycle edges, never the negotiation path.
+        // KPI sampling starts at initialization and stops when the host disconnects.
+        // It reads getStats and lifecycle edges; sensing follows voice enablement.
         VoiceMetrics.wirePeers(() => [...rtc.peers.values()]);
         VoiceMetrics.start();
         SensorNode.wirePeers(() => [...rtc.peers.values()].map((p) => ({ index: p.index, pc: p.pc })));
@@ -438,7 +438,7 @@ export class VoiceRTC {
     // ── harness probes over the live peers (read-only) ────────────────────────
 
     /** Total inbound audio packets + emitted samples + loudest level across
-     *  peers — the packet-arrival signal the audio-gap/grace drivers key on. */
+     *  peers — a legacy diagnostic. Revised gap drivers use identified audioStats snapshots. */
     private async rxAudio(): Promise<{ pkts: number; samples: number; level: number }> {
         let pkts = 0, samples = 0, level = 0;
         for (const peer of this.peers.values()) {
