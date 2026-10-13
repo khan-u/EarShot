@@ -22,7 +22,7 @@ const N       = Math.max(1, parseInt(process.argv[2] || "2", 10));
 const HOLD_MS = Math.max(5, parseInt(process.argv[3] || "12", 10)) * 1000;
 const PORT    = parseInt(process.argv[4] || "8090", 10);
 const BASE    = "http://127.0.0.1:" + PORT + "/";
-const OUT_DIR = path.join(__dirname, "data");
+const OUT_DIR = process.env.EXPERIMENT_DATA_DIR || path.join(__dirname, "runs");
 const STAMP   = new Date().toISOString().replace(/[:.]/g, "-");
 
 // Headless-media args without the game-specific flags (no metal/angle needed

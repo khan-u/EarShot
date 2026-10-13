@@ -28,14 +28,13 @@ async function bootClient(browser, i) {
 }
 
 const { readAudioStats, uplinkRate } = require("./lib/audio-probes.cjs");
+const { readSensorStats } = require("./lib/sensor-probes.cjs");
 const snapUplink = page => page.evaluate(readAudioStats);
 
 async function collect(page, user, uplinkKbps) {
+    const sensor = await page.evaluate(readSensorStats);
     const rec = await page.evaluate(async (u) => {
         const kpis       = await window.wsnVoice.kpis();
-        const sense      = window.wsnSense      ? await window.wsnSense.stats()          : null;
-        const senseLinks = window.wsnSense?.links ? window.wsnSense.links()               : null;
-        const energy     = window.wsnEnergy     ? window.wsnEnergy.total()               : null;
         return {
             user: u,
             pos:     window.wsnGame      ? window.wsnGame.pos()           : null,
@@ -43,11 +42,10 @@ async function collect(page, user, uplinkKbps) {
             peers:   window.wsnVoiceCtl.peers(),
             kpis,
             links:   kpis.links || null,
-            sense,
-            senseLinks,
-            energy,
         };
     }, user);
+    Object.assign(rec, { sense: sensor.stats, senseReports: sensor.reports,
+        senseKindCounts: sensor.kindCounts, senseReportScope: sensor.reportScope, energy: sensor.energy });
     rec.meanUpKbps = uplinkKbps;
     return rec;
 }

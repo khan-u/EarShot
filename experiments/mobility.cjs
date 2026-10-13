@@ -22,7 +22,7 @@ const TILES    = parseInt(process.argv[2] || "22", 10);
 const HOLD_MS  = Math.max(2, parseInt(process.argv[3] || "6", 10)) * 1000;
 const POLL_MS  = 250;
 const STAMP    = new Date().toISOString().replace(/[:.]/g, "-");
-const OUT_DIR  = path.join(__dirname, "data");
+const OUT_DIR  = process.env.EXPERIMENT_DATA_DIR || path.join(__dirname, "runs");
 const UID      = Date.now().toString(36).slice(-6);
 
 const peers = (page) => page.evaluate(() => window.wsnVoiceCtl.peers());

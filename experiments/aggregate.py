@@ -6,7 +6,7 @@ Reads experiments/data/ relative to this script:
   wsn-*-summary-*.json with meanUpKbps/sense (Phase B: uplink + suppression)
   wsn-mobility-*.json           (teardown / reconnect)
 Prints historical summaries. Last lexicographically sorted summary per N wins.
-Schema-v2 packet-gap runs are intentionally excluded from these legacy tables.
+New runs live in experiments/runs/ and are excluded from these legacy tables.
 
 Usage:  python3 aggregate.py
 """
@@ -31,7 +31,7 @@ def group12():
         if "perClient" in d:
             latest[d["N"]] = d
     if not latest:
-        print("  (no cluster-sweep data yet — run: node harness.cjs <N> 40)")
+        print("  (no archived formation data)")
         return
     print("== Group 1+2: formation / glare / latency / uplink vs N ==")
     print(f"{'N':>2} {'peers':>5} {'connLinks':>9} {'setupMed':>8} {'ICE%':>4} "
@@ -55,7 +55,7 @@ def group12():
 def group3():
     files = sorted(glob.glob(os.path.join(DATA, "wsn-mobility-*.json")))
     if not files:
-        print("\n== Group 3: mobility ==\n  (no mobility data yet — run: node mobility.cjs 22 6)")
+        print("\n== Group 3: mobility ==\n  (no archived mobility data)")
         return
     # Complete-case validity: a cycle counts only if ALL THREE phases completed
     # (form, teardown, reconnect >= 0). A run where one phase times out (-1) is a
@@ -87,7 +87,7 @@ def group3():
 def audiogap():
     files = sorted(glob.glob(os.path.join(DATA, "wsn-audiogap-*.json")))
     if not files:
-        print("\n== Group 3b: audio gap ==\n  (no audio-gap data yet — run: ./audiogap-run.sh 5)")
+        print("\n== Group 3b: audio gap ==\n  (no archived packet-gap data)")
         return
     # Only valid==True runs count: the harness marks runs invalid when either
     # instant (stop/resume) could not be measured, and earlier detector-era
@@ -115,7 +115,7 @@ def audiogap():
 def sensing():
     files = sorted(glob.glob(os.path.join(DATA, "wsn-sensing-*.json")))
     if not files:
-        print("\n== Sensing scenarios ==\n  (no data yet — run: ./sensing-run.sh 5)")
+        print("\n== Sensing scenarios ==\n  (no archived sensing data)")
         return
     by_sc = {}
     for f in files:
@@ -223,7 +223,7 @@ def realnet():
 def gracegap():
     files = sorted(glob.glob(os.path.join(DATA, "wsn-gracegap-*.json")))
     if not files:
-        print("\n== Grace-window sweep ==\n  (no data yet — run: HEADED=1 node gracegap.cjs <W> 6)")
+        print("\n== Grace-window sweep ==\n  (no archived grace-window data)")
         return
     # Group by (absence D, grace W): the D=6 s sweep and the D=12 s knee
     # validation are separate experiments and must not be merged. A run counts
@@ -253,7 +253,7 @@ def gracegap():
 def dtx():
     files = sorted(glob.glob(os.path.join(DATA, "wsn-dtx-*.json")))
     if not files:
-        print("\n== DTX uplink ==\n  (no data yet — run: HEADED=1 node dtxtest.cjs <tone|speech> <0|1>)")
+        print("\n== DTX uplink ==\n  (no archived DTX data)")
         return
     by = {}
     for f in files:
